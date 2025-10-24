@@ -1,3 +1,5 @@
 selenium
 requests
 lxml
+python-dotenv
+webdriver-manager
