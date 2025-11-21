@@ -3,6 +3,7 @@ from . import constants as c
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 def __prompt_email_password():
   u = input("Email: ")
@@ -12,6 +13,28 @@ def __prompt_email_password():
 def page_has_loaded(driver):
     page_state = driver.execute_script('return document.readyState;')
     return page_state == 'complete'
+
+
+def _dismiss_cookie_banner(driver, timeout=5):
+    """Try to close the LinkedIn cookie banner so navigation works."""
+    selectors = [
+        # Buttons are usually labelled “Accept” / “Reject”
+        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept')]",
+        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'reject')]",
+        # Some variants expose an aria-label
+        "//button[@aria-label='Accept cookies']",
+    ]
+
+    for selector in selectors:
+        try:
+            btn = WebDriverWait(driver, timeout).until(
+                EC.element_to_be_clickable((By.XPATH, selector))
+            )
+            btn.click()
+            return True
+        except Exception:
+            continue
+    return False
 
 def login(driver, email=None, password=None, cookie = None, timeout=10):
     if cookie is not None:
@@ -34,8 +57,21 @@ def login(driver, email=None, password=None, cookie = None, timeout=10):
         remember = driver.find_element(By.ID,c.REMEMBER_PROMPT)
         if remember:
             remember.submit()
-  
-    element = WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.CLASS_NAME, c.VERIFY_LOGIN_ID)))
+
+    _dismiss_cookie_banner(driver, timeout=timeout)
+
+    try:
+        WebDriverWait(driver, timeout).until(
+            EC.any_of(
+                EC.presence_of_element_located((By.CLASS_NAME, c.VERIFY_LOGIN_ID)),
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='Search']")),
+                EC.url_contains("/feed"),
+                EC.url_contains("/in/")
+            )
+        )
+    except TimeoutException:
+        # Nav selectors on LinkedIn can change; continue even if we didn't spot them in time.
+        pass
   
 def _login_with_cookie(driver, cookie):
     driver.get("https://www.linkedin.com/login")
