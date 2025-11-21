@@ -22,12 +22,35 @@ def __prompt_email_password():
 
 
 def _random_mouse_movements(driver, move_count=0):
-    """Jitter the mouse around the page to mimic human behavior."""
+    """Jitter the mouse around the page with curved moves and slight overshoot."""
     if driver is None:
         return
 
     if move_count <= 0:
         move_count = random.randint(2, 5)
+
+    def _clamp(val, upper):
+        return max(1, min(upper - 1, int(val)))
+
+    def _bezier_curve(p0, p1, p2, p3, steps):
+        pts = []
+        for i in range(steps + 1):
+            t = i / float(steps)
+            mt = 1 - t
+            x = (
+                mt * mt * mt * p0[0]
+                + 3 * mt * mt * t * p1[0]
+                + 3 * mt * t * t * p2[0]
+                + t * t * t * p3[0]
+            )
+            y = (
+                mt * mt * mt * p0[1]
+                + 3 * mt * mt * t * p1[1]
+                + 3 * mt * t * t * p2[1]
+                + t * t * t * p3[1]
+            )
+            pts.append((int(x), int(y)))
+        return pts
 
     try:
         body = driver.find_element(By.TAG_NAME, "body")
@@ -43,16 +66,59 @@ def _random_mouse_movements(driver, move_count=0):
     if width <= 0 or height <= 0:
         return
 
+    # Start the cursor from a random point to vary entry paths.
+    start_x = random.randint(1, max(width - 1, 1))
+    start_y = random.randint(1, max(height - 1, 1))
+    try:
+        ActionChains(driver).move_to_element_with_offset(body, start_x, start_y).perform()
+    except Exception:
+        return
+
     for _ in range(move_count):
         try:
-            x_offset = random.randint(1, max(width - 1, 1))
-            y_offset = random.randint(1, max(height - 1, 1))
-            (
-                ActionChains(driver)
-                .move_to_element_with_offset(body, x_offset, y_offset)
-                .pause(random.uniform(0.25, 0.75))
-                .perform()
+            end_x = random.randint(1, max(width - 1, 1))
+            end_y = random.randint(1, max(height - 1, 1))
+
+            dx = end_x - start_x
+            dy = end_y - start_y
+            overshoot_factor = 1 + random.uniform(0.05, 0.2)
+            overshoot_x = _clamp(start_x + dx * overshoot_factor, width)
+            overshoot_y = _clamp(start_y + dy * overshoot_factor, height)
+
+            ctrl1 = (
+                _clamp(start_x + dx * random.uniform(0.2, 0.35) + random.randint(-25, 25), width),
+                _clamp(start_y + dy * random.uniform(0.2, 0.35) + random.randint(-25, 25), height),
             )
+            ctrl2 = (
+                _clamp(start_x + dx * random.uniform(0.55, 0.75) + random.randint(-30, 30), width),
+                _clamp(start_y + dy * random.uniform(0.55, 0.75) + random.randint(-30, 30), height),
+            )
+
+            main_steps = random.randint(6, 12)
+            back_steps = random.randint(3, 6)
+            path = _bezier_curve((start_x, start_y), ctrl1, ctrl2, (overshoot_x, overshoot_y), main_steps)
+
+            settle_ctrl1 = (
+                _clamp(overshoot_x + (end_x - overshoot_x) * random.uniform(0.25, 0.45) + random.randint(-15, 15), width),
+                _clamp(overshoot_y + (end_y - overshoot_y) * random.uniform(0.25, 0.45) + random.randint(-15, 15), height),
+            )
+            settle_ctrl2 = (
+                _clamp(overshoot_x + (end_x - overshoot_x) * random.uniform(0.55, 0.75) + random.randint(-12, 12), width),
+                _clamp(overshoot_y + (end_y - overshoot_y) * random.uniform(0.55, 0.75) + random.randint(-12, 12), height),
+            )
+            settle_path = _bezier_curve((overshoot_x, overshoot_y), settle_ctrl1, settle_ctrl2, (end_x, end_y), back_steps)
+
+            full_path = path[1:] + settle_path  # skip the starting point to avoid duplicates
+            chain = ActionChains(driver)
+            for px, py in full_path:
+                chain.move_to_element_with_offset(body, px, py)
+                if random.random() < 0.2:
+                    chain.pause(random.uniform(0.4, 0.9))
+                else:
+                    chain.pause(random.uniform(0.05, 0.18))
+            chain.perform()
+            start_x, start_y = end_x, end_y
+            time.sleep(random.uniform(0.05, 0.3))
         except Exception:
             # Best-effort jitter; ignore failures so scraping can proceed.
             break
@@ -77,8 +143,150 @@ def human_delay(driver=None, min_seconds=5, max_seconds=20):
         max_seconds = min_seconds
     if driver:
         reject_cookies(driver, timeout=2, retries=0)
-    _random_mouse_movements(driver)
-    time.sleep(random.uniform(min_seconds, max_seconds))
+    # Spread the wait into chunks with jitter and occasional navigation noise.
+    total_sleep = random.uniform(min_seconds, max_seconds)
+    chunks = random.randint(1, 3)
+    for _ in range(chunks):
+        if driver:
+            _random_mouse_movements(driver, move_count=random.randint(1, 3))
+            if random.random() < 0.25:
+                _random_navigation_actions(driver)
+        segment = max(0.05, total_sleep / chunks * random.uniform(0.6, 1.4))
+        time.sleep(segment)
+
+
+def human_like_scroll(driver, target_ratio=1.0):
+    """Scroll in a non-linear, human style with small backtracks and overshoot."""
+    if driver is None:
+        return
+
+    try:
+        total_height = int(
+            driver.execute_script(
+                "return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);"
+            )
+            or 0
+        )
+        viewport_height = int(
+            driver.execute_script(
+                "return window.innerHeight || document.documentElement.clientHeight || 0;"
+            )
+            or 0
+        )
+        current_y = int(
+            driver.execute_script(
+                "return window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;"
+            )
+            or 0
+        )
+    except Exception:
+        try:
+            driver.execute_script(
+                f"window.scrollTo(0, document.body.scrollHeight*{float(target_ratio)});"
+            )
+        except Exception:
+            pass
+        return
+
+    if total_height <= 0 or viewport_height <= 0:
+        return
+
+    target_ratio = max(0.0, min(1.0, target_ratio))
+    max_scroll_target = max(total_height - viewport_height, 0)
+    target_y = max(0, min(int(total_height * target_ratio), max_scroll_target))
+    travel = target_y - current_y
+    if travel == 0:
+        return
+
+    steps = random.randint(5, 8)
+    positions = []
+    for i in range(steps):
+        progress = (i + 1) / steps
+        wobble = random.uniform(-0.15, 0.18)
+        pos = current_y + travel * progress * (1 + wobble)
+        positions.append(max(0, min(max_scroll_target, int(pos))))
+
+    direction = 1 if travel > 0 else -1
+    if len(positions) > 2:
+        backtrack = positions[-1] - direction * random.randint(40, 120)
+        backtrack = max(0, min(max_scroll_target, backtrack))
+        positions.insert(-1, backtrack)
+
+    overshoot_pixels = max(60, int(abs(travel) * random.uniform(0.05, 0.18)))
+    overshoot = target_y + direction * overshoot_pixels
+    overshoot = max(0, min(max_scroll_target, overshoot))
+    settle = target_y - direction * random.randint(-35, 35)
+    settle = max(0, min(max_scroll_target, settle))
+
+    positions.extend([overshoot, settle, target_y])
+
+    cleaned = []
+    for pos in positions:
+        if cleaned and cleaned[-1] == pos:
+            continue
+        cleaned.append(pos)
+
+    for pos in cleaned:
+        try:
+            driver.execute_script("window.scrollTo(0, arguments[0]);", pos)
+        except Exception:
+            break
+        time.sleep(random.uniform(0.12, 0.5))
+
+
+def _random_navigation_actions(driver):
+    """Occasional navigation-like noise to mimic users (tab peek, resize, selection, idle)."""
+    if driver is None:
+        return
+
+    try:
+        roll = random.random()
+
+        if roll < 0.2:
+            # Slight viewport resize.
+            size = driver.get_window_size()
+            width = size.get("width", 1200)
+            height = size.get("height", 900)
+            width = max(900, min(1600, width + random.randint(-80, 120)))
+            height = max(700, min(1100, height + random.randint(-60, 90)))
+            driver.set_window_size(width, height)
+            time.sleep(random.uniform(0.2, 0.5))
+            return
+
+        if roll < 0.4:
+            # Briefly select some text.
+            script = """
+            const nodes = Array.from(document.querySelectorAll('p, span, div')).filter(n => (n.innerText || '').trim().length > 20);
+            if (!nodes.length) return false;
+            const candidates = nodes.slice(0, Math.min(nodes.length, 25));
+            const target = candidates[Math.floor(Math.random() * candidates.length)];
+            const range = document.createRange();
+            range.selectNodeContents(target);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            return true;
+            """
+            driver.execute_script(script)
+            time.sleep(random.uniform(0.2, 0.7))
+            return
+
+        if roll < 0.55:
+            # Tab peek: open a blank tab briefly, then return.
+            current = driver.current_window_handle
+            driver.switch_to.new_window("tab")
+            driver.get("about:blank")
+            time.sleep(random.uniform(0.2, 0.6))
+            driver.close()
+            driver.switch_to.window(current)
+            time.sleep(random.uniform(0.1, 0.3))
+            return
+
+        # Idle/no-op pause.
+        time.sleep(random.uniform(0.25, 0.9))
+    except Exception:
+        # Best-effort; ignore failures.
+        return
 
 
 def page_has_loaded(driver):

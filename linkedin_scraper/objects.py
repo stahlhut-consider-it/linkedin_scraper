@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
+import random
 
 from selenium.webdriver.remote.webdriver import WebDriver
 
@@ -91,7 +92,20 @@ class Scraper:
     def mouse_click(self, elem):
         self.human_pause()
         action = webdriver.ActionChains(self.driver)
-        action.move_to_element(elem).perform()
+        # Hover with small offsets to look less robotic before caller clicks the element.
+        try:
+            bounds = elem.size or {}
+            max_x = max(1, int(bounds.get("width", 4)))
+            max_y = max(1, int(bounds.get("height", 4)))
+            offset_x = random.randint(-min(6, max_x // 3), min(6, max_x // 3))
+            offset_y = random.randint(-min(6, max_y // 3), min(6, max_y // 3))
+        except Exception:
+            offset_x = random.randint(-3, 3)
+            offset_y = random.randint(-3, 3)
+
+        hover_pause = random.uniform(0.12, 0.35)
+        settle_pause = random.uniform(0.05, 0.2)
+        action.move_to_element(elem).pause(hover_pause).move_by_offset(offset_x, offset_y).pause(settle_pause).perform()
 
     def wait_for_element_to_load(self, by=By.CLASS_NAME, name="pv-top-card", base=None):
         base = base or self.driver
@@ -134,15 +148,11 @@ class Scraper:
         return False
 
     def scroll_to_half(self):
-        self.driver.execute_script(
-            "window.scrollTo(0, Math.ceil(document.body.scrollHeight/2));"
-        )
+        actions.human_like_scroll(self.driver, target_ratio=0.5)
         self.human_pause()
 
     def scroll_to_bottom(self):
-        self.driver.execute_script(
-            "window.scrollTo(0, document.body.scrollHeight);"
-        )
+        actions.human_like_scroll(self.driver, target_ratio=1.0)
         self.human_pause()
 
     def scroll_class_name_element_to_page_percent(self, class_name:str, page_percent:float):
