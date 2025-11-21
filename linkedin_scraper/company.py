@@ -7,6 +7,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
 from .objects import Scraper
 from .person import Person
+from . import actions
 import os
 import json
 
@@ -64,18 +65,20 @@ class Company(Scraper):
         self.affiliated_companies = affiliated_companies
 
         if driver is None:
+            chrome_options = actions.build_chrome_options()
             try:
                 if os.getenv("CHROMEDRIVER") == None:
                     driver_path = os.path.join(os.path.dirname(__file__), 'drivers/chromedriver')
                 else:
                     driver_path = os.getenv("CHROMEDRIVER")
 
-                driver = webdriver.Chrome(driver_path)
+                driver = webdriver.Chrome(driver_path, options=chrome_options)
             except:
-                driver = webdriver.Chrome()
+                driver = webdriver.Chrome(options=chrome_options)
 
         self.driver = driver
         driver.get(linkedin_url)
+        actions.reject_cookies(driver, timeout=15, retries=2, retry_delay=2)
         self.human_pause()
 
         if scrape:

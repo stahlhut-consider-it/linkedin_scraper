@@ -4,6 +4,7 @@ import random
 import time
 from pathlib import Path
 
+from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.common.by import By
@@ -57,10 +58,25 @@ def _random_mouse_movements(driver, move_count=0):
             break
 
 
+def reject_cookies(driver, timeout=12, retries=2, retry_delay=1.5):
+    """Wrapper that retries cookie rejection a few times."""
+    if driver is None:
+        return False
+
+    for attempt in range(retries + 1):
+        if _dismiss_cookie_banner(driver, timeout=timeout):
+            return True
+        if attempt < retries:
+            time.sleep(retry_delay)
+    return False
+
+
 def human_delay(driver=None, min_seconds=5, max_seconds=20):
     """Insert a long, randomized pause and optional mouse jitter to look human."""
     if max_seconds < min_seconds:
         max_seconds = min_seconds
+    if driver:
+        reject_cookies(driver, timeout=2, retries=0)
     _random_mouse_movements(driver)
     time.sleep(random.uniform(min_seconds, max_seconds))
 
@@ -70,26 +86,147 @@ def page_has_loaded(driver):
     return page_state == 'complete'
 
 
-def _dismiss_cookie_banner(driver, timeout=5):
+def _dismiss_cookie_banner(driver, timeout=12):
     """Try to close the LinkedIn cookie banner so navigation works."""
-    selectors = [
-        # Buttons are usually labelled “Accept” / “Reject”
-        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'accept')]",
-        "//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'reject')]",
-        # Some variants expose an aria-label
-        "//button[@aria-label='Accept cookies']",
+
+    def _click_first_matching(selectors, wait_time):
+        deadline = time.time() + wait_time
+        while time.time() < deadline:
+            for selector in selectors:
+                for btn in driver.find_elements(By.XPATH, selector):
+                    try:
+                        if btn.is_displayed() and btn.is_enabled():
+                            btn.click()
+                            return True
+                    except Exception:
+                        continue
+            time.sleep(0.2)
+        return False
+
+    def _selectors_for_labels(labels):
+        # Normalize strings to lowercase (supports basic German characters too).
+        normalized_text = "translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜß', 'abcdefghijklmnopqrstuvwxyzäöüß')"
+        normalized_aria = "translate(@aria-label, 'ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜß', 'abcdefghijklmnopqrstuvwxyzäöüß')"
+        selectors = []
+        for label in labels:
+            selectors.extend(
+                [
+                    f"//button[contains({normalized_text}, '{label}')]",
+                    f"//span[contains({normalized_text}, '{label}')]/ancestor::button[1]",
+                    f"//button[contains({normalized_aria}, '{label}')]",
+                ]
+            )
+        return selectors
+
+    # Prefer explicit rejection in English or German to avoid accepting cookies accidentally.
+    reject_labels = [
+        "reject",
+        "reject all",
+        "decline",
+        "decline all",
+        "refuse",
+        "ablehnen",
+        "alle ablehnen",
+        "nicht zustimmen",
+        "keine zustimmung",
+        "nur notwendige",
+        "nur erforderliche",
+        "nur notwendige cookies",
+        "essential only",
+        "only essential",
+        "necessary only",
+        "strictly necessary",
+        "reject non-essential",
+    ]
+    reject_labels = list(dict.fromkeys(reject_labels))
+    reject_selectors = _selectors_for_labels(reject_labels)
+
+    manage_labels = [
+        "manage preferences",
+        "manage settings",
+        "manage choices",
+        "präferenzen verwalten",
+        "einstellungen verwalten",
+        "auswahl verwalten",
+    ]
+    manage_selectors = _selectors_for_labels(manage_labels)
+
+    # Fallback close buttons for variants that expose only a dismiss action.
+    dismiss_selectors = [
+        "//button[@id='artdeco-global-alert-container__action-dismiss']",
+        "//button[contains(@aria-label, 'dismiss') or contains(@aria-label, 'schließen') or contains(@aria-label, 'close')]",
+        "//button[contains(@data-test-modal-close-btn, '')]",
     ]
 
-    for selector in selectors:
-        try:
-            btn = WebDriverWait(driver, timeout).until(
-                EC.element_to_be_clickable((By.XPATH, selector))
-            )
-            btn.click()
+    if _click_first_matching(reject_selectors, timeout):
+        return True
+
+    if _click_first_matching(dismiss_selectors, 2):
+        return True
+
+    # Some variants hide reject behind a manage/preferences dialog.
+    if _click_first_matching(manage_selectors, 3):
+        if _click_first_matching(reject_selectors, 6):
             return True
+
+    # Try inside common consent iframes.
+    try:
+        frames = driver.find_elements(By.XPATH, "//iframe[contains(@src, 'consent') or contains(@id, 'cmp') or contains(@id, 'sp_message')]")
+        for frame in frames:
+            try:
+                driver.switch_to.frame(frame)
+                if _click_first_matching(reject_selectors, 3):
+                    driver.switch_to.default_content()
+                    return True
+                if _click_first_matching(dismiss_selectors, 2):
+                    driver.switch_to.default_content()
+                    return True
+            finally:
+                try:
+                    driver.switch_to.default_content()
+                except Exception:
+                    pass
+    except Exception:
+        try:
+            driver.switch_to.default_content()
         except Exception:
-            continue
+            pass
+
+    # JS-based sweep over common clickable elements to find label text when DOM is dynamic.
+    try:
+        script = """
+        const labels = arguments[0];
+        const nodes = Array.from(document.querySelectorAll('button, [role="button"], a'));
+        for (const node of nodes) {
+            const text = (node.innerText || node.textContent || '').toLowerCase();
+            if (labels.some(lbl => text.includes(lbl))) {
+                node.click();
+                return true;
+            }
+        }
+        return false;
+        """
+        if driver.execute_script(script, reject_labels):
+            return True
+    except Exception:
+        pass
+
+    # Broader fall-back: scan all visible buttons for a reject label.
+    try:
+        for btn in driver.find_elements(By.TAG_NAME, "button"):
+            label_text = " ".join(
+                [btn.text or "", btn.get_attribute("aria-label") or ""]
+            ).lower()
+            if any(term in label_text for term in reject_labels):
+                if btn.is_enabled():
+                    btn.click()
+                    return True
+    except Exception:
+        pass
+
+    # We intentionally avoid auto-accepting cookies. If nothing was clicked, signal failure.
     return False
+
 
 def _cookie_path(path_hint=None):
     env_path = os.getenv(COOKIE_ENV_KEY)
@@ -156,6 +293,7 @@ def login(driver, email=None, password=None, cookie=None, timeout=10, cookie_pat
         email, password = __prompt_email_password()
   
     driver.get("https://www.linkedin.com/login")
+    reject_cookies(driver, timeout=timeout, retries=2, retry_delay=1)
     human_delay(driver)
     element = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "username")))
     human_delay(driver)
@@ -175,7 +313,7 @@ def login(driver, email=None, password=None, cookie=None, timeout=10, cookie_pat
             human_delay(driver)
             remember.submit()
 
-    _dismiss_cookie_banner(driver, timeout=timeout)
+    reject_cookies(driver, timeout=timeout, retries=2, retry_delay=1)
     human_delay(driver)
 
     if _is_logged_in(driver, timeout=timeout):
@@ -193,6 +331,37 @@ def _login_with_cookie(driver, cookie, timeout=10):
         })
         driver.get("https://www.linkedin.com/feed/")
         human_delay(driver)
+        reject_cookies(driver, timeout=timeout, retries=2, retry_delay=1)
         return _is_logged_in(driver, timeout=timeout)
     except Exception:
         return False
+
+
+def build_chrome_options(headless=False):
+    """Return Chrome options tuned to reduce prompts/trackers and look less automated."""
+    options = webdriver.ChromeOptions()
+
+    prefs = {
+        # Block noisy prompts that can trigger additional banners.
+        "profile.default_content_setting_values.notifications": 2,
+        "profile.default_content_setting_values.geolocation": 2,
+        "profile.default_content_setting_values.media_stream": 2,
+        # Lean towards fewer tracking cookies without blocking first-party auth cookies.
+        "profile.block_third_party_cookies": True,
+        "intl.accept_languages": "en-US,en",
+    }
+    options.add_experimental_option("prefs", prefs)
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-notifications")
+    options.add_argument("--disable-popup-blocking")
+    options.add_argument("--no-first-run")
+    options.add_argument("--no-default-browser-check")
+    options.add_argument("--lang=en-US")
+
+    if headless:
+        options.add_argument("--headless=new")
+
+    return options

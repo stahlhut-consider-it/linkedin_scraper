@@ -5,6 +5,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
 from .objects import Experience, Education, Scraper, Interest, Accomplishment, Contact
+from . import actions
 import os
 from linkedin_scraper import selectors
 
@@ -43,6 +44,7 @@ class Person(Scraper):
         self.contacts = contacts or []
 
         if driver is None:
+            chrome_options = actions.build_chrome_options()
             try:
                 if os.getenv("CHROMEDRIVER") == None:
                     driver_path = os.path.join(
@@ -51,12 +53,13 @@ class Person(Scraper):
                 else:
                     driver_path = os.getenv("CHROMEDRIVER")
 
-                driver = webdriver.Chrome(driver_path)
+                driver = webdriver.Chrome(driver_path, options=chrome_options)
             except:
-                driver = webdriver.Chrome()
+                driver = webdriver.Chrome(options=chrome_options)
 
         if get:
             driver.get(linkedin_url)
+            actions.reject_cookies(driver, timeout=15, retries=2, retry_delay=2)
 
         self.driver = driver
 
