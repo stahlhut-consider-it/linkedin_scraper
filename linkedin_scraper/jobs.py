@@ -66,6 +66,7 @@ class Job(Scraper):
         driver = self.driver
         
         driver.get(self.linkedin_url)
+        self.human_pause()
         self.focus()
         self.job_title = self.wait_for_element_to_load(name="job-details-jobs-unified-top-card__job-title").text.strip()
         self.company = self.wait_for_element_to_load(name="job-details-jobs-unified-top-card__company-name").text.strip()

@@ -109,6 +109,7 @@ class Person(Scraper):
     def get_experiences(self):
         url = os.path.join(self.linkedin_url, "details/experience")
         self.driver.get(url)
+        self.human_pause()
         self.focus()
         main = self.wait_for_element_to_load(by=By.TAG_NAME, name="main")
         self.scroll_to_half()
@@ -244,6 +245,7 @@ class Person(Scraper):
     def get_educations(self):
         url = os.path.join(self.linkedin_url, "details/education")
         self.driver.get(url)
+        self.human_pause()
         self.focus()
         main = self.wait_for_element_to_load(by=By.TAG_NAME, name="main")
         self.scroll_to_half()
@@ -343,6 +345,7 @@ class Person(Scraper):
 
         # get name and location
         self.get_name_and_location()
+        self.human_pause()
 
         self.open_to_work = self.is_open_to_work()
 
@@ -351,17 +354,22 @@ class Person(Scraper):
         driver.execute_script(
             "window.scrollTo(0, Math.ceil(document.body.scrollHeight/2));"
         )
+        self.human_pause()
         driver.execute_script(
             "window.scrollTo(0, Math.ceil(document.body.scrollHeight/1.5));"
         )
+        self.human_pause()
 
         # get experience
         self.get_experiences()
+        self.human_pause()
 
         # get education
         self.get_educations()
+        self.human_pause()
 
         driver.get(self.linkedin_url)
+        self.human_pause()
 
         # get interest
         try:
@@ -415,6 +423,7 @@ class Person(Scraper):
         # get connections
         try:
             driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+            self.human_pause()
             _ = WebDriverWait(driver, self.__WAIT_FOR_ELEMENT_TIMEOUT).until(
                 EC.presence_of_element_located((By.CLASS_NAME, "mn-connections"))
             )

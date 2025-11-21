@@ -1,10 +1,8 @@
 import os
 from typing import List
-from time import sleep
 import urllib.parse
 
 from .objects import Scraper
-from . import constants as c
 from .jobs import Job
 
 from selenium.webdriver.common.by import By
@@ -45,9 +43,10 @@ class JobSearch(Scraper):
     def scrape_logged_in(self, close_on_complete=True, scrape_recommended_jobs=True):
         driver = self.driver
         driver.get(self.base_url)
+        self.human_pause()
         if scrape_recommended_jobs:
             self.focus()
-            sleep(self.WAIT_FOR_ELEMENT_TIMEOUT)
+            self.human_pause()
             job_area = self.wait_for_element_to_load(name="scaffold-finite-scroll__content")
             areas = self.wait_for_all_elements_to_load(name="artdeco-card", base=job_area)
             for i, area in enumerate(areas):
@@ -65,24 +64,25 @@ class JobSearch(Scraper):
     def search(self, search_term: str) -> List[Job]:
         url = os.path.join(self.base_url, "search") + f"?keywords={urllib.parse.quote(search_term)}&refresh=true"
         self.driver.get(url)
+        self.human_pause()
         self.scroll_to_bottom()
         self.focus()
-        sleep(self.WAIT_FOR_ELEMENT_TIMEOUT)
+        self.human_pause()
 
         job_listing_class_name = "jobs-search-results-list"
         job_listing = self.wait_for_element_to_load(name=job_listing_class_name)
 
         self.scroll_class_name_element_to_page_percent(job_listing_class_name, 0.3)
         self.focus()
-        sleep(self.WAIT_FOR_ELEMENT_TIMEOUT)
+        self.human_pause()
 
         self.scroll_class_name_element_to_page_percent(job_listing_class_name, 0.6)
         self.focus()
-        sleep(self.WAIT_FOR_ELEMENT_TIMEOUT)
+        self.human_pause()
 
         self.scroll_class_name_element_to_page_percent(job_listing_class_name, 1)
         self.focus()
-        sleep(self.WAIT_FOR_ELEMENT_TIMEOUT)
+        self.human_pause()
 
         job_results = []
         for job_card in self.wait_for_all_elements_to_load(name="job-card-list", base=job_listing):

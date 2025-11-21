@@ -7,7 +7,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
 from .objects import Scraper
 from .person import Person
-import time
 import os
 import json
 
@@ -75,8 +74,9 @@ class Company(Scraper):
             except:
                 driver = webdriver.Chrome()
 
-        driver.get(linkedin_url)
         self.driver = driver
+        driver.get(linkedin_url)
+        self.human_pause()
 
         if scrape:
             self.scrape(get_employees=get_employees, close_on_complete=close_on_complete)
@@ -129,13 +129,14 @@ class Company(Scraper):
         except:
             pass
         driver.get(os.path.join(self.linkedin_url, "people"))
+        self.human_pause()
 
         _ = WebDriverWait(driver, 3).until(EC.presence_of_all_elements_located((By.XPATH, '//span[@dir="ltr"]')))
 
         driver.execute_script("window.scrollTo(0, Math.ceil(document.body.scrollHeight/2));")
-        time.sleep(1)
+        self.human_pause()
         driver.execute_script("window.scrollTo(0, Math.ceil(document.body.scrollHeight*3/4));")
-        time.sleep(1)
+        self.human_pause()
 
         results_list = driver.find_element(By.CLASS_NAME, list_css)
         results_li = results_list.find_elements(By.TAG_NAME, "li")
@@ -147,7 +148,7 @@ class Company(Scraper):
           driver.execute_script("window.scrollTo(0, Math.ceil(document.body.scrollHeight));")
           results_li = results_list.find_elements(By.TAG_NAME, "li")
           while len(results_li) == previous_results and loop <= 5:
-            time.sleep(1)
+            self.human_pause()
             driver.execute_script("window.scrollTo(0, Math.ceil(document.body.scrollHeight));")
             results_li = results_list.find_elements(By.TAG_NAME, "li")
             loop += 1
@@ -167,13 +168,13 @@ class Company(Scraper):
             _ = WebDriverWait(driver, wait_time).until(EC.presence_of_element_located((By.CLASS_NAME, list_css)))
 
             driver.execute_script("window.scrollTo(0, Math.ceil(document.body.scrollHeight/2));")
-            time.sleep(1)
+            self.human_pause()
             driver.execute_script("window.scrollTo(0, Math.ceil(document.body.scrollHeight*2/3));")
-            time.sleep(1)
+            self.human_pause()
             driver.execute_script("window.scrollTo(0, Math.ceil(document.body.scrollHeight*3/4));")
-            time.sleep(1)
+            self.human_pause()
             driver.execute_script("window.scrollTo(0, Math.ceil(document.body.scrollHeight));")
-            time.sleep(1)
+            self.human_pause()
 
             get_data(results_li_len)
             results_li_len = len(total)
@@ -185,6 +186,7 @@ class Company(Scraper):
         driver = self.driver
 
         driver.get(self.linkedin_url)
+        self.human_pause()
 
         _ = WebDriverWait(driver, 3).until(EC.presence_of_all_elements_located((By.XPATH, '//div[@dir="ltr"]')))
 
@@ -202,7 +204,7 @@ class Company(Scraper):
           driver.get(os.path.join(self.linkedin_url, "about"))
 
         _ = WebDriverWait(driver, 3).until(EC.presence_of_all_elements_located((By.TAG_NAME, 'section')))
-        time.sleep(3)
+        self.human_pause()
 
         if 'Cookie Policy' in driver.find_elements(By.TAG_NAME, "section")[1].text or any(classname in driver.find_elements(By.TAG_NAME, "section")[1].get_attribute('class') for classname in AD_BANNER_CLASSNAME):
             section_id = 4
@@ -254,6 +256,7 @@ class Company(Scraper):
             pass
 
         driver.execute_script("window.scrollTo(0, Math.ceil(document.body.scrollHeight/2));")
+        self.human_pause()
 
 
         try:
@@ -287,6 +290,7 @@ class Company(Scraper):
             self.employees = self.get_employees()
 
         driver.get(self.linkedin_url)
+        self.human_pause()
 
         if close_on_complete:
             driver.close()

@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from time import sleep
 
 from selenium.webdriver import Chrome
 
+from . import actions
 from . import constants as c
 
 from selenium import webdriver
@@ -65,10 +65,19 @@ class Scraper:
     driver: Chrome = None
     WAIT_FOR_ELEMENT_TIMEOUT = 5
     TOP_CARD = "pv-top-card"
+    HUMAN_DELAY_MIN = 5
+    HUMAN_DELAY_MAX = 20
 
-    @staticmethod
-    def wait(duration):
-        sleep(int(duration))
+    def human_pause(self, min_seconds=None, max_seconds=None):
+        """Pause with random mouse jitter to mimic slower human interactions."""
+        min_seconds = min_seconds or self.HUMAN_DELAY_MIN
+        max_seconds = max_seconds or self.HUMAN_DELAY_MAX
+        actions.human_delay(self.driver, min_seconds=min_seconds, max_seconds=max_seconds)
+
+    def wait(self, duration):
+        min_seconds = max(duration, self.HUMAN_DELAY_MIN)
+        max_seconds = max(self.HUMAN_DELAY_MAX, min_seconds)
+        self.human_pause(min_seconds=min_seconds, max_seconds=max_seconds)
 
     def focus(self):
         self.driver.execute_script('alert("Focus window")')
@@ -79,6 +88,7 @@ class Scraper:
             pass
 
     def mouse_click(self, elem):
+        self.human_pause()
         action = webdriver.ActionChains(self.driver)
         action.move_to_element(elem).perform()
 
@@ -126,16 +136,19 @@ class Scraper:
         self.driver.execute_script(
             "window.scrollTo(0, Math.ceil(document.body.scrollHeight/2));"
         )
+        self.human_pause()
 
     def scroll_to_bottom(self):
         self.driver.execute_script(
             "window.scrollTo(0, document.body.scrollHeight);"
         )
+        self.human_pause()
 
     def scroll_class_name_element_to_page_percent(self, class_name:str, page_percent:float):
         self.driver.execute_script(
             f'elem = document.getElementsByClassName("{class_name}")[0]; elem.scrollTo(0, elem.scrollHeight*{str(page_percent)});'
         )
+        self.human_pause()
 
     def __find_element_by_class_name__(self, class_name):
         try:
