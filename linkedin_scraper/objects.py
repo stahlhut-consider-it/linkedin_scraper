@@ -63,10 +63,10 @@ class Accomplishment(Institution):
 @dataclass
 class Scraper:
     driver: Chrome = None
-    WAIT_FOR_ELEMENT_TIMEOUT = 5
+    WAIT_FOR_ELEMENT_TIMEOUT = 8
     TOP_CARD = "pv-top-card"
     HUMAN_DELAY_MIN = 1
-    HUMAN_DELAY_MAX = 10
+    HUMAN_DELAY_MAX = 8
 
     def human_pause(self, min_seconds=None, max_seconds=None):
         """Pause with random mouse jitter to mimic slower human interactions."""
