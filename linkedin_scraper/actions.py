@@ -4,7 +4,7 @@ import random
 import time
 from pathlib import Path
 
-from selenium import webdriver
+import undetected_chromedriver as uc
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.common.by import By
@@ -339,7 +339,7 @@ def _login_with_cookie(driver, cookie, timeout=10):
 
 def build_chrome_options(headless=False):
     """Return Chrome options tuned to reduce prompts/trackers and look less automated."""
-    options = webdriver.ChromeOptions()
+    options = uc.ChromeOptions()
 
     prefs = {
         # Block noisy prompts that can trigger additional banners.

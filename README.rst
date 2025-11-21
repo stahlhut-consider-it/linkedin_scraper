@@ -70,7 +70,7 @@ Version **2.0.0** and before is called ``linkedin_user_scraper`` and can be inst
 Setup
 -----
 
-First, you must set your chromedriver location by
+Undetected ChromeDriver is used by default and will manage a compatible driver automatically. To force a specific driver binary, set:
 
 .. code-block:: bash
 
@@ -88,8 +88,8 @@ Sample Usage
 .. code-block:: python
 
    from linkedin_scraper import Person, actions
-   from selenium import webdriver
-   driver = webdriver.Chrome()
+   import undetected_chromedriver as uc
+   driver = uc.Chrome()
 
    email = "some-email@email.address"
    password = "password123"
@@ -120,9 +120,9 @@ Job Scraping
 .. code-block:: python
 
    from linkedin_scraper import JobSearch, actions
-   from selenium import webdriver
+   import undetected_chromedriver as uc
 
-   driver = webdriver.Chrome()
+   driver = uc.Chrome()
    email = "some-email@email.address"
    password = "password123"
    actions.login(driver, email, password) # if email and password isnt given, it'll prompt in terminal
@@ -135,9 +135,9 @@ Job Search Scraping
 .. code-block:: python
 
    from linkedin_scraper import JobSearch, actions
-   from selenium import webdriver
+   import undetected_chromedriver as uc
 
-   driver = webdriver.Chrome()
+   driver = uc.Chrome()
    email = "some-email@email.address"
    password = "password123"
    actions.login(driver, email, password) # if email and password isnt given, it'll prompt in terminal
@@ -160,8 +160,8 @@ Scraping sites where login is required first
    .. code-block:: python
 
       from linkedin_scraper import Person
-      from selenium import webdriver
-      driver = webdriver.Chrome()
+      import undetected_chromedriver as uc
+      driver = uc.Chrome()
       person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver = driver, scrape=False)
 
 #. Login to Linkedin
@@ -189,8 +189,8 @@ From verison **2.4.0** on, ``actions`` is a part of the library that allows sign
 .. code-block:: python
 
    from linkedin_scraper import Person, actions
-   from selenium import webdriver
-   driver = webdriver.Chrome()
+   import undetected_chromedriver as uc
+   driver = uc.Chrome()
    email = "some-email@email.address"
    password = "password123"
    actions.login(driver, email, password) # if email and password isnt given, it'll prompt in terminal
@@ -256,13 +256,14 @@ This the most recent job title they have.
 ``driver``
 ~~~~~~~~~~~~~~
 
-This is the driver from which to scraper the Linkedin profile. A driver using Chrome is created by default. However, if a driver is passed in, that will be used instead.
+This is the driver from which to scraper the Linkedin profile. An undetected Chrome driver is created by default. However, if a driver is passed in, that will be used instead.
 
 For example
 
 .. code-block:: python
 
-   driver = webdriver.Chrome()
+   import undetected_chromedriver as uc
+   driver = uc.Chrome()
    person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver = driver)
 
 ``scrape``
@@ -340,7 +341,7 @@ Other companies that are affiliated with this one
 ``driver``
 ~~~~~~~~~~~~~~
 
-This is the driver from which to scraper the Linkedin profile. A driver using Chrome is created by default. However, if a driver is passed in, that will be used instead.
+This is the driver from which to scraper the Linkedin profile. An undetected Chrome driver is created by default. However, if a driver is passed in, that will be used instead.
 
 ``get_employees``
 ~~~~~~~~~~~~~~~~~~~~~
@@ -351,7 +352,8 @@ For example
 
 .. code-block:: python
 
-   driver = webdriver.Chrome()
+   import undetected_chromedriver as uc
+   driver = uc.Chrome()
    company = Company("https://ca.linkedin.com/company/google", driver=driver)
 
 ``scrape(close_on_complete=True)``

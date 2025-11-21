@@ -53,7 +53,7 @@ pip3 install --user linkedin_scraper
 Version **2.0.0** and before is called `linkedin_user_scraper` and can be installed via `pip3 install --user linkedin_user_scraper`
 
 ## Setup
-First, you must set your chromedriver location by
+Undetected ChromeDriver is used by default and will manage a compatible driver automatically. To force a specific driver binary, set:
 
 ```bash
 export CHROMEDRIVER=~/chromedriver
@@ -68,8 +68,8 @@ To use it, just create the class.
 ### Sample Usage
 ```python
 from linkedin_scraper import Person, actions
-from selenium import webdriver
-driver = webdriver.Chrome()
+import undetected_chromedriver as uc
+driver = uc.Chrome()
 
 email = "some-email@email.address"
 password = "password123"
@@ -94,9 +94,9 @@ company = Company("https://ca.linkedin.com/company/google")
 ### Job Scraping
 ```python
 from linkedin_scraper import Job, actions
-from selenium import webdriver
+import undetected_chromedriver as uc
 
-driver = webdriver.Chrome()
+driver = uc.Chrome()
 email = "some-email@email.address"
 password = "password123"
 actions.login(driver, email, password) # if email and password isnt given, it'll prompt in terminal
@@ -107,9 +107,9 @@ job = Job("https://www.linkedin.com/jobs/collections/recommended/?currentJobId=3
 ### Job Search Scraping
 ```python
 from linkedin_scraper import JobSearch, actions
-from selenium import webdriver
+import undetected_chromedriver as uc
 
-driver = webdriver.Chrome()
+driver = uc.Chrome()
 email = "some-email@email.address"
 password = "password123"
 actions.login(driver, email, password) # if email and password isnt given, it'll prompt in terminal
@@ -129,8 +129,8 @@ job_listings = job_search.search("Machine Learning Engineer") # returns the list
 3. 
 ```python
 from linkedin_scraper import Person
-from selenium import webdriver
-driver = webdriver.Chrome()
+import undetected_chromedriver as uc
+driver = uc.Chrome()
 person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver = driver, scrape=False)
 ```
 4. Login to Linkedin
@@ -154,8 +154,8 @@ From verison **2.4.0** on, `actions` is a part of the library that allows signin
 
 ```python
 from linkedin_scraper import Person, actions
-from selenium import webdriver
-driver = webdriver.Chrome()
+import undetected_chromedriver as uc
+driver = uc.Chrome()
 email = "some-email@email.address"
 password = "password123"
 actions.login(driver, email, password) # if email and password isnt given, it'll prompt in terminal
@@ -199,11 +199,12 @@ This the most recent company or institution they have worked at.
 This the most recent job title they have. 
 
 #### `driver`
-This is the driver from which to scraper the Linkedin profile. A driver using Chrome is created by default. However, if a driver is passed in, that will be used instead.
+This is the driver from which to scraper the Linkedin profile. An undetected Chrome driver is created by default. However, if a driver is passed in, that will be used instead.
 
 For example
 ```python
-driver = webdriver.Chrome()
+import undetected_chromedriver as uc
+driver = uc.Chrome()
 person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver = driver)
 ```
 
@@ -260,14 +261,15 @@ Pages that the company owns to showcase their products
 Other companies that are affiliated with this one
 
 #### `driver`
-This is the driver from which to scraper the Linkedin profile. A driver using Chrome is created by default. However, if a driver is passed in, that will be used instead.
+This is the driver from which to scraper the Linkedin profile. An undetected Chrome driver is created by default. However, if a driver is passed in, that will be used instead.
 
 #### `get_employees`
 Whether to get all the employees of company
 
 For example
 ```python
-driver = webdriver.Chrome()
+import undetected_chromedriver as uc
+driver = uc.Chrome()
 company = Company("https://ca.linkedin.com/company/google", driver=driver)
 ```
 

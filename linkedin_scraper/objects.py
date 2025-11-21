@@ -1,6 +1,7 @@
 from dataclasses import dataclass
+from typing import Optional
 
-from selenium.webdriver import Chrome
+from selenium.webdriver.remote.webdriver import WebDriver
 
 from . import actions
 from . import constants as c
@@ -62,7 +63,7 @@ class Accomplishment(Institution):
 
 @dataclass
 class Scraper:
-    driver: Chrome = None
+    driver: Optional[WebDriver] = None
     WAIT_FOR_ELEMENT_TIMEOUT = 10
     TOP_CARD = "pv-top-card"
     HUMAN_DELAY_MIN = 1

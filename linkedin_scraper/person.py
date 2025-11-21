@@ -1,5 +1,5 @@
 import requests
-from selenium import webdriver
+import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -45,17 +45,16 @@ class Person(Scraper):
 
         if driver is None:
             chrome_options = actions.build_chrome_options()
+            driver_path = os.getenv("CHROMEDRIVER")
+            if driver_path is None:
+                driver_path = os.path.join(os.path.dirname(__file__), "drivers/chromedriver")
             try:
-                if os.getenv("CHROMEDRIVER") == None:
-                    driver_path = os.path.join(
-                        os.path.dirname(__file__), "drivers/chromedriver"
-                    )
+                if driver_path and os.path.exists(driver_path):
+                    driver = uc.Chrome(driver_executable_path=driver_path, options=chrome_options)
                 else:
-                    driver_path = os.getenv("CHROMEDRIVER")
-
-                driver = webdriver.Chrome(driver_path, options=chrome_options)
-            except:
-                driver = webdriver.Chrome(options=chrome_options)
+                    driver = uc.Chrome(options=chrome_options)
+            except Exception:
+                driver = uc.Chrome(options=chrome_options)
 
         if get:
             driver.get(linkedin_url)
