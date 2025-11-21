@@ -14,6 +14,7 @@ from selenium.common.exceptions import TimeoutException
 from . import constants as c
 
 COOKIE_ENV_KEY = "LINKEDIN_LI_AT_FILE"
+HEADLESS_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
 
 def __prompt_email_password():
   u = input("Email: ")
@@ -287,6 +288,63 @@ def _random_navigation_actions(driver):
     except Exception:
         # Best-effort; ignore failures.
         return
+
+
+def _patch_headless_fingerprints(driver, headless=False):
+    """Mask common headless fingerprints (UA, navigator props, WebGL vendor)."""
+    if driver is None:
+        return
+
+    try:
+        if headless:
+            driver.execute_cdp_cmd(
+                "Network.setUserAgentOverride",
+                {"userAgent": HEADLESS_USER_AGENT, "platform": "MacIntel"},
+            )
+            driver.execute_cdp_cmd(
+                "Emulation.setDeviceMetricsOverride",
+                {
+                    "width": 1280,
+                    "height": 900,
+                    "deviceScaleFactor": 1,
+                    "mobile": False,
+                },
+            )
+    except Exception:
+        pass
+
+    try:
+        driver.execute_script(
+            """
+            // Hide webdriver flag.
+            Object.defineProperty(navigator, 'webdriver', {get: () => false});
+            // Reasonable language/plugin hints.
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
+            // Hardware hints.
+            Object.defineProperty(navigator, 'platform', {get: () => 'MacIntel'});
+            Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+            Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+            // Ensure chrome object exists.
+            window.chrome = window.chrome || { runtime: {} };
+            """
+        )
+    except Exception:
+        pass
+
+    try:
+        driver.execute_script(
+            """
+            const getParameter = WebGLRenderingContext.prototype.getParameter;
+            WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                if (parameter === 37445) return 'Intel Inc.';               // UNMASKED_VENDOR_WEBGL
+                if (parameter === 37446) return 'Intel Iris OpenGL Engine'; // UNMASKED_RENDERER_WEBGL
+                return getParameter.call(this, parameter);
+            };
+            """
+        )
+    except Exception:
+        pass
 
 
 def page_has_loaded(driver):
@@ -571,5 +629,8 @@ def build_chrome_options(headless=False):
 
     if headless:
         options.add_argument("--headless=new")
+        # Avoid obvious headless viewport/UA clues.
+        options.add_argument("--window-size=1280,900")
+        options.add_argument(f"--user-agent={HEADLESS_USER_AGENT}")
 
     return options

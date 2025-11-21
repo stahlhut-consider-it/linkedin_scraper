@@ -49,7 +49,7 @@ class Company(Scraper):
     employees = []
     headcount = None
 
-    def __init__(self, linkedin_url = None, name = None, about_us =None, website = None, phone = None, headquarters = None, founded = None, industry = None, company_type = None, company_size = None, specialties = None, showcase_pages =[], affiliated_companies = [], driver = None, scrape = True, get_employees = True, close_on_complete = True):
+    def __init__(self, linkedin_url = None, name = None, about_us =None, website = None, phone = None, headquarters = None, founded = None, industry = None, company_type = None, company_size = None, specialties = None, showcase_pages =[], affiliated_companies = [], driver = None, scrape = True, get_employees = True, close_on_complete = True, headless=False):
         self.linkedin_url = linkedin_url
         self.name = name
         self.about_us = about_us
@@ -65,7 +65,7 @@ class Company(Scraper):
         self.affiliated_companies = affiliated_companies
 
         if driver is None:
-            chrome_options = actions.build_chrome_options()
+            chrome_options = actions.build_chrome_options(headless=headless)
             driver_path = os.getenv("CHROMEDRIVER")
             if driver_path is None:
                 driver_path = os.path.join(os.path.dirname(__file__), "drivers/chromedriver")
@@ -76,6 +76,7 @@ class Company(Scraper):
                     driver = uc.Chrome(options=chrome_options)
             except Exception:
                 driver = uc.Chrome(options=chrome_options)
+        actions._patch_headless_fingerprints(driver, headless=headless)
 
         self.driver = driver
         driver.get(linkedin_url)

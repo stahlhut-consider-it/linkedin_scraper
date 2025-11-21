@@ -32,6 +32,7 @@ class Person(Scraper):
         scrape=True,
         close_on_complete=True,
         time_to_wait_after_login=0,
+        headless=False,
     ):
         self.linkedin_url = linkedin_url
         self.name = name
@@ -44,7 +45,7 @@ class Person(Scraper):
         self.contacts = contacts or []
 
         if driver is None:
-            chrome_options = actions.build_chrome_options()
+            chrome_options = actions.build_chrome_options(headless=headless)
             driver_path = os.getenv("CHROMEDRIVER")
             if driver_path is None:
                 driver_path = os.path.join(os.path.dirname(__file__), "drivers/chromedriver")
@@ -55,6 +56,7 @@ class Person(Scraper):
                     driver = uc.Chrome(options=chrome_options)
             except Exception:
                 driver = uc.Chrome(options=chrome_options)
+        actions._patch_headless_fingerprints(driver, headless=headless)
 
         if get:
             driver.get(linkedin_url)
