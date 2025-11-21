@@ -1,12 +1,18 @@
 import getpass
+import os
 import random
 import time
-from . import constants as c
+from pathlib import Path
+
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
+
+from . import constants as c
+
+COOKIE_ENV_KEY = "LINKEDIN_LI_AT_FILE"
 
 def __prompt_email_password():
   u = input("Email: ")
@@ -85,9 +91,66 @@ def _dismiss_cookie_banner(driver, timeout=5):
             continue
     return False
 
-def login(driver, email=None, password=None, cookie = None, timeout=10):
-    if cookie is not None:
-        return _login_with_cookie(driver, cookie)
+def _cookie_path(path_hint=None):
+    env_path = os.getenv(COOKIE_ENV_KEY)
+    if path_hint:
+        return Path(path_hint).expanduser()
+    if env_path:
+        return Path(env_path).expanduser()
+    return Path.home() / ".linkedin_li_at.cookie"
+
+
+def _load_cookie_from_disk(path):
+    try:
+        if path.is_file():
+            value = path.read_text().strip()
+            return value or None
+    except Exception:
+        return None
+    return None
+
+
+def _persist_cookie_value(value, path):
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(value.strip())
+        return True
+    except Exception:
+        return False
+
+
+def _read_li_at_from_driver(driver):
+    try:
+        for ckie in driver.get_cookies():
+            if ckie.get("name") == "li_at" and ckie.get("value"):
+                return ckie.get("value")
+    except Exception:
+        return None
+    return None
+
+
+def _is_logged_in(driver, timeout=10):
+    try:
+        WebDriverWait(driver, timeout).until(
+            EC.any_of(
+                EC.presence_of_element_located((By.CLASS_NAME, c.VERIFY_LOGIN_ID)),
+                EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='Search']")),
+                EC.url_contains("/feed"),
+                EC.url_contains("/in/")
+            )
+        )
+        return True
+    except TimeoutException:
+        return False
+
+
+def login(driver, email=None, password=None, cookie=None, timeout=10, cookie_path=None):
+    cookie_file = _cookie_path(cookie_path)
+    cookie = cookie or _load_cookie_from_disk(cookie_file)
+    if cookie:
+        if _login_with_cookie(driver, cookie, timeout=timeout):
+            _persist_cookie_value(cookie, cookie_file)
+            return
   
     if not email or not password:
         email, password = __prompt_email_password()
@@ -115,24 +178,21 @@ def login(driver, email=None, password=None, cookie = None, timeout=10):
     _dismiss_cookie_banner(driver, timeout=timeout)
     human_delay(driver)
 
-    try:
-        WebDriverWait(driver, timeout).until(
-            EC.any_of(
-                EC.presence_of_element_located((By.CLASS_NAME, c.VERIFY_LOGIN_ID)),
-                EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder*='Search']")),
-                EC.url_contains("/feed"),
-                EC.url_contains("/in/")
-            )
-        )
-    except TimeoutException:
-        # Nav selectors on LinkedIn can change; continue even if we didn't spot them in time.
-        pass
+    if _is_logged_in(driver, timeout=timeout):
+        new_cookie = _read_li_at_from_driver(driver)
+        if new_cookie:
+            _persist_cookie_value(new_cookie, cookie_file)
   
-def _login_with_cookie(driver, cookie):
-    driver.get("https://www.linkedin.com/login")
-    human_delay(driver)
-    driver.add_cookie({
-      "name": "li_at",
-      "value": cookie
-    })
-    human_delay(driver)
+def _login_with_cookie(driver, cookie, timeout=10):
+    try:
+        driver.get("https://www.linkedin.com/")
+        human_delay(driver)
+        driver.add_cookie({
+          "name": "li_at",
+          "value": cookie
+        })
+        driver.get("https://www.linkedin.com/feed/")
+        human_delay(driver)
+        return _is_logged_in(driver, timeout=timeout)
+    except Exception:
+        return False

@@ -114,7 +114,8 @@ class Person(Scraper):
         main = self.wait_for_element_to_load(by=By.TAG_NAME, name="main")
         self.scroll_to_half()
         self.scroll_to_bottom()
-        main_list = self.wait_for_element_to_load(name="pvs-list__container", base=main)
+        # Re-fetch the list container from the live DOM to avoid stale references
+        main_list = self.wait_for_element_to_load(name="pvs-list__container")
         for position in main_list.find_elements(By.CLASS_NAME, "pvs-list__paged-list-item"):
             position = position.find_element(By.CSS_SELECTOR, "div[data-view-name='profile-component-entity']")
             
