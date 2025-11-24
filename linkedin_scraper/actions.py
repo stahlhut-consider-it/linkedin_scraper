@@ -47,6 +47,10 @@ def build_browser_config(
         browser_args=list(browser_args) if browser_args else None,
         lang=lang,
     )
+    if config.browser_args is None:
+        config.browser_args = []
+    if "--disable-blink-features=AutomationControlled" not in config.browser_args:
+        config.browser_args.append("--disable-blink-features=AutomationControlled")
     if headless:
         ua = HEADLESS_USER_AGENT
         config.user_agent = ua
