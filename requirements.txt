@@ -1,6 +1,4 @@
 selenium
 undetected-chromedriver
-requests
-lxml
 python-dotenv
 webdriver-manager

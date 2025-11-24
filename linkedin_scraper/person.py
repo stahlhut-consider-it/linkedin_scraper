@@ -1,4 +1,3 @@
-import requests
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -7,7 +6,6 @@ from selenium.common.exceptions import NoSuchElementException
 from .objects import Experience, Education, Scraper, Interest, Accomplishment, Contact
 from . import actions
 import os
-from linkedin_scraper import selectors
 
 
 class Person(Scraper):

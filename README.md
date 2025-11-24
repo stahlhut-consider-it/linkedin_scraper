@@ -1,16 +1,13 @@
 # Linkedin Scraper
 
-Scrapes Linkedin User Data
+Scrapes Linkedin person data.
 
 [Linkedin Scraper](#linkedin-scraper)
 * [Installation](#installation)
 * [Setup](#setup)
 * [Usage](#usage)
   + [Sample Usage](#sample-usage)
-  + [User Scraping](#user-scraping)
-  + [Company Scraping](#company-scraping)
-  + [Job Scraping](#job-scraping)
-  + [Job Search Scraping](#job-search-scraping)
+  + [Person Scraping](#person-scraping)
   + [Scraping sites where login is required first](#scraping-sites-where-login-is-required-first)
   + [Scraping sites and login automatically](#scraping-sites-and-login-automatically)
 * [API](#api)
@@ -27,21 +24,6 @@ Scrapes Linkedin User Data
     - [`driver`](#driver)
     - [`scrape`](#scrape)
     - [`scrape(close_on_complete=True)`](#scrapeclose_on_completetrue)
-  + [Company](#company)
-    - [`linkedin_url`](#linkedin_url-1)
-    - [`name`](#name-1)
-    - [`about_us`](#about_us)
-    - [`website`](#website)
-    - [`headquarters`](#headquarters)
-    - [`founded`](#founded)
-    - [`company_type`](#company_type)
-    - [`company_size`](#company_size)
-    - [`specialties`](#specialties)
-    - [`showcase_pages`](#showcase_pages)
-    - [`affiliated_companies`](#affiliated_companies)
-    - [`driver`](#driver-1)
-    - [`get_employees`](#get_employees)
-    - [`scrape(close_on_complete=True)`](#scrapeclose_on_completetrue-1)
 * [Contribution](#contribution)
 
 ## Installation
@@ -79,48 +61,10 @@ person = Person("https://www.linkedin.com/in/joey-sham-aa2a50122", driver=driver
 
 **NOTE**: The account used to log-in should have it's language set English to make sure everything works as expected.
 
-### User Scraping
+### Person Scraping
 ```python
 from linkedin_scraper import Person
 person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5")
-```
-
-### Company Scraping
-```python
-from linkedin_scraper import Company
-company = Company("https://ca.linkedin.com/company/google")
-```
-
-### Job Scraping
-```python
-from linkedin_scraper import Job, actions
-import undetected_chromedriver as uc
-
-driver = uc.Chrome()
-email = "some-email@email.address"
-password = "password123"
-actions.login(driver, email, password) # if email and password isnt given, it'll prompt in terminal
-input("Press Enter")
-job = Job("https://www.linkedin.com/jobs/collections/recommended/?currentJobId=3456898261", driver=driver, close_on_complete=False)
-```
-
-### Job Search Scraping
-```python
-from linkedin_scraper import JobSearch, actions
-import undetected_chromedriver as uc
-
-driver = uc.Chrome()
-email = "some-email@email.address"
-password = "password123"
-actions.login(driver, email, password) # if email and password isnt given, it'll prompt in terminal
-input("Press Enter")
-job_search = JobSearch(driver=driver, close_on_complete=False, scrape=False)
-# job_search contains jobs from your logged in front page:
-# - job_search.recommended_jobs
-# - job_search.still_hiring
-# - job_search.more_jobs
-
-job_listings = job_search.search("Machine Learning Engineer") # returns the list of `Job` from the first page
 ```
 
 ### Scraping sites where login is required first
@@ -181,16 +125,16 @@ This is the name of the person
 This is the small paragraph about the person
 
 #### `experiences`
-This is the past experiences they have. A list of `linkedin_scraper.scraper.Experience`
+This is the past experiences they have. A list of `linkedin_scraper.objects.Experience`
 
 #### `educations`
-This is the past educations they have. A list of `linkedin_scraper.scraper.Education`
+This is the past educations they have. A list of `linkedin_scraper.objects.Education`
 
 #### `interests`
-This is the interests they have. A list of `linkedin_scraper.scraper.Interest`
+This is the interests they have. A list of `linkedin_scraper.objects.Interest`
 
 #### `accomplishment`
-This is the accomplishments they have. A list of `linkedin_scraper.scraper.Accomplishment`
+This is the accomplishments they have. A list of `linkedin_scraper.objects.Accomplishment`
 
 #### `company`
 This the most recent company or institution they have worked at. 
@@ -199,7 +143,7 @@ This the most recent company or institution they have worked at.
 This the most recent job title they have. 
 
 #### `driver`
-This is the driver from which to scraper the Linkedin profile. An undetected Chrome driver is created by default. However, if a driver is passed in, that will be used instead.
+This is the driver used to scrape the Linkedin profile. An undetected Chrome driver is created by default. However, if a driver is passed in, that will be used instead.
 
 For example
 ```python
@@ -214,68 +158,6 @@ When this is **True**, the scraping happens automatically. To scrape afterwards,
 
 #### `scrape(close_on_complete=True)`
 This is the meat of the code, where execution of this function scrapes the profile. If *close_on_complete* is True (which it is by default), then the browser will close upon completion. If scraping of other profiles are desired, then you might want to set that to false so you can keep using the same driver.
-
- 
-
-
-### Company
-
-```python
-Company(linkedin_url=None, name=None, about_us=None, website=None, phone=None, headquarters=None, founded=None, company_type=None, company_size=None, specialties=None, showcase_pages=[], affiliated_companies=[], driver=None, scrape=True, get_employees=True)
-```
-
-#### `linkedin_url`
-This is the linkedin url of their profile
-
-#### `name`
-This is the name of the company
-
-#### `about_us`
-The description of the company
-
-#### `website`
-The website of the company
-
-#### `phone`
-The phone of the company
-
-#### `headquarters`
-The headquarters location of the company
-
-#### `founded`
-When the company was founded
-
-#### `company_type`
-The type of the company
-
-#### `company_size`
-How many people are employeed at the company
-
-#### `specialties`
-What the company specializes in
-
-#### `showcase_pages`
-Pages that the company owns to showcase their products
-
-#### `affiliated_companies`
-Other companies that are affiliated with this one
-
-#### `driver`
-This is the driver from which to scraper the Linkedin profile. An undetected Chrome driver is created by default. However, if a driver is passed in, that will be used instead.
-
-#### `get_employees`
-Whether to get all the employees of company
-
-For example
-```python
-import undetected_chromedriver as uc
-driver = uc.Chrome()
-company = Company("https://ca.linkedin.com/company/google", driver=driver)
-```
-
-
-#### `scrape(close_on_complete=True)`
-This is the meat of the code, where execution of this function scrapes the company. If *close_on_complete* is True (which it is by default), then the browser will close upon completion. If scraping of other companies are desired, then you might want to set that to false so you can keep using the same driver.
 
 ## Contribution
 
