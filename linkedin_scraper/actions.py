@@ -3,6 +3,7 @@ import getpass
 import os
 import random
 import time
+import math
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
 import json
@@ -80,7 +81,7 @@ async def _viewport_size(tab: zd.Tab) -> tuple[int, int]:
 
 
 async def _random_mouse_movements(tab: Optional[zd.Tab], move_count: int = 0) -> None:
-    """Jitter the mouse around the page using zendriver's native mouse helpers."""
+    """Jitter the mouse around the page using curved (Bezier) mouse paths."""
     if tab is None:
         return
 
@@ -95,15 +96,51 @@ async def _random_mouse_movements(tab: Optional[zd.Tab], move_count: int = 0) ->
     start_y = random.randint(1, max(height - 1, 1))
     await tab.mouse_move(start_x, start_y, steps=3)
 
+    def _bezier_points(sx: int, sy: int, ex: int, ey: int, segments: int = 12) -> list[tuple[int, int]]:
+        """Generate points along a cubic Bezier curve clamped to the viewport."""
+        if segments <= 0:
+            return []
+        dx = ex - sx
+        dy = ey - sy
+        distance = math.hypot(dx, dy) or 1.0
+        curve_mag = distance * random.uniform(0.1, 0.35)
+        norm_x = dx / distance
+        norm_y = dy / distance
+        orth_x = -norm_y
+        orth_y = norm_x
+        cp1 = (
+            sx + dx * 0.3 + orth_x * curve_mag * random.uniform(0.5, 1.2),
+            sy + dy * 0.3 + orth_y * curve_mag * random.uniform(0.5, 1.2),
+        )
+        cp2 = (
+            sx + dx * 0.7 - orth_x * curve_mag * random.uniform(0.5, 1.2),
+            sy + dy * 0.7 - orth_y * curve_mag * random.uniform(0.5, 1.2),
+        )
+        points: list[tuple[int, int]] = []
+        for i in range(1, segments + 1):
+            t = i / segments
+            inv = 1 - t
+            x = inv**3 * sx + 3 * inv**2 * t * cp1[0] + 3 * inv * t**2 * cp2[0] + t**3 * ex
+            y = inv**3 * sy + 3 * inv**2 * t * cp1[1] + 3 * inv * t**2 * cp2[1] + t**3 * ey
+            clamped_x = max(1, min(int(round(x)), max(width - 1, 1)))
+            clamped_y = max(1, min(int(round(y)), max(height - 1, 1)))
+            points.append((clamped_x, clamped_y))
+        return points
+
+    current_x, current_y = start_x, start_y
     for _ in range(move_count):
         end_x = random.randint(1, max(width - 1, 1))
         end_y = random.randint(1, max(height - 1, 1))
-        steps = random.randint(3, 8)
-        try:
-            await tab.mouse_move(end_x, end_y, steps=steps)
-            await tab.sleep(random.uniform(0.05, 0.3))
-        except Exception:
-            break
+        segments = random.randint(8, 16)
+        path = _bezier_points(current_x, current_y, end_x, end_y, segments=segments)
+        for x, y in path:
+            try:
+                await tab.mouse_move(x, y, steps=1)
+            except Exception:
+                break
+            await tab.sleep(random.uniform(0.01, 0.05))
+        current_x, current_y = end_x, end_y
+        await tab.sleep(random.uniform(0.05, 0.3))
 
 
 async def reject_cookies(
