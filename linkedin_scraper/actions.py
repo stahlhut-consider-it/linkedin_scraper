@@ -15,10 +15,21 @@ from . import constants as c
 from .by import By
 
 COOKIE_ENV_KEY = "LINKEDIN_LI_AT_FILE"
-HEADLESS_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
 )
+HEADLESS_USER_AGENT = DEFAULT_USER_AGENT
+DEFAULT_BROWSER_ARGS = [
+    "--excludeSwitches=['enable-automation']",
+    "--no-sandbox",
+    "--disable-gpu",
+    "--disable-features=VizDisplayCompositor",
+    "--disable-infobars",
+    "--disable-dev-shm-usage",
+    "--disable-extensions",
+    "--disable-blink-features=AutomationControlled",
+]
 
 
 def _random_window_size(
@@ -61,17 +72,22 @@ def build_browser_config(
     )
     if config.browser_args is None:
         config.browser_args = []
-    if "--disable-blink-features=AutomationControlled" not in config.browser_args:
-        config.browser_args.append("--disable-blink-features=AutomationControlled")
+    for arg in DEFAULT_BROWSER_ARGS:
+        if arg not in config.browser_args:
+            config.browser_args.append(arg)
     if not any(arg.startswith("--window-size") for arg in config.browser_args):
         width, height = _random_window_size()
         config.browser_args.append(f"--window-size={width},{height}")
-    if headless:
-        ua = HEADLESS_USER_AGENT
-        config.user_agent = ua
-        if config.browser_args is None:
-            config.browser_args = []
-        config.browser_args.append(f"--user-agent={ua}")
+    user_agent = config.user_agent
+    if user_agent is None:
+        existing_ua_arg = next((arg for arg in config.browser_args if arg.startswith("--user-agent=")), None)
+        if existing_ua_arg:
+            user_agent = existing_ua_arg.split("=", 1)[1] or None
+    if user_agent is None:
+        user_agent = HEADLESS_USER_AGENT if headless else DEFAULT_USER_AGENT
+    config.user_agent = user_agent
+    if not any(arg.startswith("--user-agent=") for arg in config.browser_args):
+        config.browser_args.append(f"--user-agent={user_agent}")
     return config
 
 
