@@ -153,8 +153,6 @@ class Person(Scraper):
             return True
         except Exception:
             pass
-        if self.driver and self.driver.url and ("/feed" in self.driver.url or "/in/" in self.driver.url):
-            return True
         return False
 
     def scrape(self, close_on_complete: bool = True):

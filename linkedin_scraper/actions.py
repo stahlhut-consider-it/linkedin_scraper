@@ -308,6 +308,43 @@ def _persist_cookie_value(value: str, path: Path) -> bool:
         return False
 
 
+def _delete_cookie_file(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+async def _clear_li_at_cookie(browser: Optional[zd.Browser]) -> None:
+    """Best-effort removal of a bad li_at cookie to break redirect loops."""
+    if not browser:
+        return
+    try:
+        await browser.cookies.delete(name="li_at", domain=".linkedin.com", path="/")
+        return
+    except Exception:
+        pass
+    try:
+        await browser.cookies.delete_all()
+        return
+    except Exception:
+        pass
+    try:
+        await browser.cookies.set_all(
+            [
+                cdp.network.CookieParam(
+                    name="li_at",
+                    value="",
+                    domain=".linkedin.com",
+                    path="/",
+                    expires=0,
+                )
+            ]
+        )
+    except Exception:
+        pass
+
+
 async def _read_li_at_from_driver(tab: zd.Tab) -> Optional[str]:
     try:
         browser = tab.browser
@@ -333,8 +370,6 @@ async def _is_logged_in(tab: zd.Tab, timeout: float = 10) -> bool:
         return True
     except asyncio.TimeoutError:
         pass
-    if tab.url and ("/feed" in tab.url or "/in/" in tab.url):
-        return True
     return False
 
 
@@ -353,6 +388,9 @@ async def login(
         if await _login_with_cookie(browser, tab, cookie, timeout=timeout):
             _persist_cookie_value(cookie, cookie_file)
             return
+        # Failed cookie login: clear stored cookie and browser state so we can fall back safely.
+        _delete_cookie_file(cookie_file)
+        await _clear_li_at_cookie(browser)
 
     if not email or not password:
         email, password = __prompt_email_password()

@@ -134,6 +134,15 @@ class Scraper:
             return True
         except Exception:
             pass
+        try:
+            self._run(
+                actions.wait_for_element(
+                    self.driver, by=By.CSS_SELECTOR, name="input[placeholder*='Search']", timeout=self.WAIT_FOR_ELEMENT_TIMEOUT
+                )
+            )
+            return True
+        except Exception:
+            pass
         return False
 
     def scroll_to_half(self):
