@@ -1,36 +1,37 @@
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException
-from .objects import Experience, Education, Scraper, Interest, Accomplishment, Contact
-from . import actions
+import asyncio
 import os
+from typing import Any, Dict, List, Optional
+
+import zendriver as zd
+
+from . import actions
+from . import constants as c
+from .by import By
+from .objects import Accomplishment, Contact, Education, Experience, Interest, Scraper
 
 
 class Person(Scraper):
-
     __TOP_CARD = "main"
     __WAIT_FOR_ELEMENT_TIMEOUT = 5
 
     def __init__(
         self,
-        linkedin_url=None,
-        name=None,
-        about=None,
-        experiences=None,
-        educations=None,
-        interests=None,
-        accomplishments=None,
-        company=None,
-        job_title=None,
-        contacts=None,
-        driver=None,
-        get=True,
-        scrape=True,
-        close_on_complete=True,
-        time_to_wait_after_login=0,
-        headless=False,
+        linkedin_url: Optional[str] = None,
+        name: Optional[str] = None,
+        about: Optional[str] = None,
+        experiences: Optional[List[Experience]] = None,
+        educations: Optional[List[Education]] = None,
+        interests: Optional[List[Interest]] = None,
+        accomplishments: Optional[List[Accomplishment]] = None,
+        company: Optional[str] = None,
+        job_title: Optional[str] = None,
+        contacts: Optional[List[Contact]] = None,
+        driver: Optional[zd.Tab | zd.Browser] = None,
+        get: bool = True,
+        scrape: bool = True,
+        close_on_complete: bool = True,
+        time_to_wait_after_login: int = 0,
+        headless: bool = False,
     ):
         self.linkedin_url = linkedin_url
         self.name = name
@@ -39,31 +40,67 @@ class Person(Scraper):
         self.educations = educations or []
         self.interests = interests or []
         self.accomplishments = accomplishments or []
-        self.also_viewed_urls = []
+        self.also_viewed_urls: List[str] = []
         self.contacts = contacts or []
 
-        if driver is None:
-            chrome_options = actions.build_chrome_options(headless=headless)
-            driver_path = os.getenv("CHROMEDRIVER")
-            if driver_path is None:
-                driver_path = os.path.join(os.path.dirname(__file__), "drivers/chromedriver")
-            try:
-                if driver_path and os.path.exists(driver_path):
-                    driver = uc.Chrome(driver_executable_path=driver_path, options=chrome_options)
+        self._external_loop: Optional[asyncio.AbstractEventLoop] = None
+        try:
+            self._external_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._external_loop = None
+
+        # Only create our own loop when none is running already.
+        if self._external_loop is None:
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+        else:
+            self.loop = None
+
+        self._pending_nav: Optional[asyncio.Task] = None
+        self._pending_scrape: Optional[asyncio.Task] = None
+
+        if isinstance(driver, zd.Browser):
+            self.browser = driver
+            if get and linkedin_url:
+                if self._external_loop:
+                    self._pending_nav = asyncio.create_task(self.browser.get(linkedin_url))
+                    self.driver = None
                 else:
-                    driver = uc.Chrome(options=chrome_options)
-            except Exception:
-                driver = uc.Chrome(options=chrome_options)
-        actions._patch_headless_fingerprints(driver, headless=headless)
+                    self.driver = self._run(self.browser.get(linkedin_url or "about:blank"))
+            else:
+                self.driver = None
+            self._owns_browser = False
+        elif isinstance(driver, zd.Tab):
+            self.driver = driver
+            self.browser = driver.browser
+            self._owns_browser = False
+            if get and linkedin_url:
+                if self._external_loop:
+                    self._pending_nav = asyncio.create_task(self.browser.get(linkedin_url))
+                else:
+                    self.driver = self._run(self.browser.get(linkedin_url))
+        else:
+            if self._external_loop:
+                raise RuntimeError(
+                    "Person cannot start a browser while an event loop is already running. "
+                    "Start a browser with actions.start_browser() and pass the tab into Person."
+                )
+            config = actions.build_browser_config(headless=headless)
+            self.browser = self._run(actions.start_browser(config))
+            self._owns_browser = True
+            target_url = linkedin_url or "about:blank"
+            self.driver = self._run(self.browser.get(target_url)) if get else None
 
-        if get:
-            driver.get(linkedin_url)
-            actions.reject_cookies(driver, timeout=15, retries=2, retry_delay=2)
+        if self.driver and get and linkedin_url and not self._external_loop:
+            self._run(actions.reject_cookies(self.driver, timeout=15, retries=2, retry_delay=2))
 
-        self.driver = driver
-
-        if scrape:
-            self.scrape(close_on_complete)
+        if scrape and self.driver:
+            if self._external_loop:
+                self._pending_scrape = asyncio.create_task(
+                    self.scrape_async(close_on_complete=close_on_complete)
+                )
+            else:
+                self.scrape(close_on_complete=close_on_complete)
 
     def add_about(self, about):
         self.about.append(about)
@@ -86,365 +123,423 @@ class Person(Scraper):
     def add_contact(self, contact):
         self.contacts.append(contact)
 
-    def scrape(self, close_on_complete=True):
+    async def _ensure_navigation(self):
+        if self._pending_nav:
+            try:
+                self.driver = await self._pending_nav
+            except Exception:
+                # If navigation failed, keep existing driver reference.
+                self.driver = self.driver or None
+            self._pending_nav = None
+
+    async def _is_signed_in_async(self) -> bool:
+        try:
+            await actions.wait_for_element(
+                self.driver,
+                by=By.CLASS_NAME,
+                name=c.VERIFY_LOGIN_ID,
+                timeout=self.WAIT_FOR_ELEMENT_TIMEOUT,
+            )
+            return True
+        except Exception:
+            pass
+        try:
+            await actions.wait_for_element(
+                self.driver,
+                by=By.CSS_SELECTOR,
+                name="input[placeholder*='Search']",
+                timeout=self.WAIT_FOR_ELEMENT_TIMEOUT,
+            )
+            return True
+        except Exception:
+            pass
+        if self.driver and self.driver.url and ("/feed" in self.driver.url or "/in/" in self.driver.url):
+            return True
+        return False
+
+    def scrape(self, close_on_complete: bool = True):
+        if not self.driver:
+            return
+        if self._external_loop:
+            # Schedule in the running loop; caller can await the task if needed.
+            self._pending_scrape = asyncio.create_task(
+                self.scrape_async(close_on_complete=close_on_complete)
+            )
+            return self._pending_scrape
         if self.is_signed_in():
-            self.scrape_logged_in(close_on_complete=close_on_complete)
+            self._run(self._scrape_logged_in(close_on_complete=close_on_complete))
         else:
             print("you are not logged in!")
+            if close_on_complete and self._owns_browser and self.browser:
+                self._run(self.browser.stop())
 
-    def _click_see_more_by_class_name(self, class_name):
-        try:
-            _ = WebDriverWait(self.driver, self.__WAIT_FOR_ELEMENT_TIMEOUT).until(
-                EC.presence_of_element_located((By.CLASS_NAME, class_name))
-            )
-            div = self.driver.find_element(By.CLASS_NAME, class_name)
-            div.find_element(By.TAG_NAME, "button").click()
-        except Exception as e:
-            pass
+    async def scrape_async(self, close_on_complete: bool = True):
+        if not self.driver and self._pending_nav:
+            await self._ensure_navigation()
+        if not self.driver:
+            return
+        # If a navigation was scheduled, wait for it.
+        await self._ensure_navigation()
 
-    def is_open_to_work(self):
-        try:
-            return "#OPEN_TO_WORK" in self.driver.find_element(By.CLASS_NAME,"pv-top-card-profile-picture").find_element(By.TAG_NAME,"img").get_attribute("title")
-        except:
-            return False
+        if await self._is_signed_in_async():
+            await self._scrape_logged_in(close_on_complete=close_on_complete)
+        else:
+            print("you are not logged in!")
+            if close_on_complete and self._owns_browser and self.browser:
+                await self.browser.stop()
 
-    def get_experiences(self):
-        url = os.path.join(self.linkedin_url, "details/experience")
-        self.driver.get(url)
-        self.human_pause()
-        self.focus()
-        main = self.wait_for_element_to_load(by=By.TAG_NAME, name="main")
-        self.scroll_to_half()
-        self.scroll_to_bottom()
-        # Re-fetch the list container from the live DOM to avoid stale references
-        main_list = self.wait_for_element_to_load(name="pvs-list__container")
-        for position in main_list.find_elements(By.CLASS_NAME, "pvs-list__paged-list-item"):
-            position = position.find_element(By.CSS_SELECTOR, "div[data-view-name='profile-component-entity']")
-            
-            # Fix: Handle case where more than 2 elements are returned
-            elements = position.find_elements(By.XPATH, "*")
-            if len(elements) < 2:
-                continue  # Skip if we don't have enough elements
-                
-            company_logo_elem = elements[0]
-            position_details = elements[1]
-
-            # company elem
-            try:
-                company_linkedin_url = company_logo_elem.find_element(By.XPATH,"*").get_attribute("href")
-                if not company_linkedin_url:
-                    continue
-            except NoSuchElementException:
-                continue
-
-            # position details
-            position_details_list = position_details.find_elements(By.XPATH,"*")
-            position_summary_details = position_details_list[0] if len(position_details_list) > 0 else None
-            position_summary_text = position_details_list[1] if len(position_details_list) > 1 else None
-            
-            if not position_summary_details:
-                continue
-                
-            outer_positions = position_summary_details.find_element(By.XPATH,"*").find_elements(By.XPATH,"*")
-
-            if len(outer_positions) == 4:
-                position_title = outer_positions[0].find_element(By.TAG_NAME,"span").text
-                company = outer_positions[1].find_element(By.TAG_NAME,"span").text
-                work_times = outer_positions[2].find_element(By.TAG_NAME,"span").text
-                location = outer_positions[3].find_element(By.TAG_NAME,"span").text
-            elif len(outer_positions) == 3:
-                if "·" in outer_positions[2].text:
-                    position_title = outer_positions[0].find_element(By.TAG_NAME,"span").text
-                    company = outer_positions[1].find_element(By.TAG_NAME,"span").text
-                    work_times = outer_positions[2].find_element(By.TAG_NAME,"span").text
-                    location = ""
-                else:
-                    position_title = ""
-                    company = outer_positions[0].find_element(By.TAG_NAME,"span").text
-                    work_times = outer_positions[1].find_element(By.TAG_NAME,"span").text
-                    location = outer_positions[2].find_element(By.TAG_NAME,"span").text
-            else:
-                position_title = ""
-                company = outer_positions[0].find_element(By.TAG_NAME,"span").text if outer_positions else ""
-                work_times = outer_positions[1].find_element(By.TAG_NAME,"span").text if len(outer_positions) > 1 else ""
-                location = ""
-
-            # Safely extract times and duration
-            if work_times:
-                parts = work_times.split("·")
-                times = parts[0].strip() if parts else ""
-                duration = parts[1].strip() if len(parts) > 1 else None
-            else:
-                times = ""
-                duration = None
-
-            from_date = " ".join(times.split(" ")[:2]) if times else ""
-            to_date = " ".join(times.split(" ")[3:]) if times and len(times.split(" ")) > 3 else ""
-            
-            if position_summary_text and any(element.get_attribute("class") == "pvs-list__container" for element in position_summary_text.find_elements(By.XPATH, "*")):
-                try:
-                    inner_positions = (position_summary_text.find_element(By.CLASS_NAME,"pvs-list__container")
-                                    .find_element(By.XPATH,"*").find_element(By.XPATH,"*").find_element(By.XPATH,"*")
-                                    .find_elements(By.CLASS_NAME,"pvs-list__paged-list-item"))
-                except NoSuchElementException:
-                    inner_positions = []
-            else:
-                inner_positions = []
-            
-            if len(inner_positions) > 1:
-                descriptions = inner_positions
-                for description in descriptions:
-                    try:
-                        res = description.find_element(By.TAG_NAME,"a").find_elements(By.XPATH,"*")
-                        position_title_elem = res[0] if len(res) > 0 else None
-                        work_times_elem = res[1] if len(res) > 1 else None
-                        location_elem = res[2] if len(res) > 2 else None
-
-                        location = location_elem.find_element(By.XPATH,"*").text if location_elem else None
-                        position_title = position_title_elem.find_element(By.XPATH,"*").find_element(By.TAG_NAME,"*").text if position_title_elem else ""
-                        work_times = work_times_elem.find_element(By.XPATH,"*").text if work_times_elem else ""
-                        
-                        # Safely extract times and duration
-                        if work_times:
-                            parts = work_times.split("·")
-                            times = parts[0].strip() if parts else ""
-                            duration = parts[1].strip() if len(parts) > 1 else None
-                        else:
-                            times = ""
-                            duration = None
-                            
-                        from_date = " ".join(times.split(" ")[:2]) if times else ""
-                        to_date = " ".join(times.split(" ")[3:]) if times and len(times.split(" ")) > 3 else ""
-
-                        experience = Experience(
-                            position_title=position_title,
-                            from_date=from_date,
-                            to_date=to_date,
-                            duration=duration,
-                            location=location,
-                            description=description,
-                            institution_name=company,
-                            linkedin_url=company_linkedin_url
-                        )
-                        self.add_experience(experience)
-                    except (NoSuchElementException, IndexError) as e:
-                        # Skip this description if elements are missing
-                        continue
-            else:
-                description = position_summary_text.text if position_summary_text else ""
-
-                experience = Experience(
-                    position_title=position_title,
-                    from_date=from_date,
-                    to_date=to_date,
-                    duration=duration,
-                    location=location,
-                    description=description,
-                    institution_name=company,
-                    linkedin_url=company_linkedin_url
-                )
-                self.add_experience(experience)
-
-    def get_educations(self):
-        url = os.path.join(self.linkedin_url, "details/education")
-        self.driver.get(url)
-        self.human_pause()
-        self.focus()
-        main = self.wait_for_element_to_load(by=By.TAG_NAME, name="main")
-        self.scroll_to_half()
-        self.scroll_to_bottom()
-        main_list = self.wait_for_element_to_load(name="pvs-list__container", base=main)
-        for position in main_list.find_elements(By.CLASS_NAME,"pvs-list__paged-list-item"):
-            try:
-                position = position.find_element(By.CSS_SELECTOR, "div[data-view-name='profile-component-entity']")
-                
-                # Fix: Handle case where more than 2 elements are returned
-                elements = position.find_elements(By.XPATH,"*")
-                if len(elements) < 2:
-                    continue  # Skip if we don't have enough elements
-                    
-                institution_logo_elem = elements[0]
-                position_details = elements[1]
-
-                # institution elem
-                try:
-                    institution_linkedin_url = institution_logo_elem.find_element(By.XPATH,"*").get_attribute("href")
-                except NoSuchElementException:
-                    institution_linkedin_url = None
-
-                # position details
-                position_details_list = position_details.find_elements(By.XPATH,"*")
-                position_summary_details = position_details_list[0] if len(position_details_list) > 0 else None
-                position_summary_text = position_details_list[1] if len(position_details_list) > 1 else None
-                
-                if not position_summary_details:
-                    continue
-                    
-                outer_positions = position_summary_details.find_element(By.XPATH,"*").find_elements(By.XPATH,"*")
-
-                institution_name = outer_positions[0].find_element(By.TAG_NAME,"span").text if outer_positions else ""
-                degree = outer_positions[1].find_element(By.TAG_NAME,"span").text if len(outer_positions) > 1 else None
-
-                from_date = None
-                to_date = None
-                
-                if len(outer_positions) > 2:
-                    try:
-                        times = outer_positions[2].find_element(By.TAG_NAME,"span").text
-
-                        if times and "-" in times:
-                            split_times = times.split(" ")
-                            dash_index = split_times.index("-") if "-" in split_times else -1
-                            
-                            if dash_index > 0:
-                                from_date = split_times[dash_index-1]
-                            if dash_index < len(split_times) - 1:
-                                to_date = split_times[-1]
-                    except (NoSuchElementException, ValueError):
-                        from_date = None
-                        to_date = None
-
-                description = position_summary_text.text if position_summary_text else ""
-
-                education = Education(
-                    from_date=from_date,
-                    to_date=to_date,
-                    description=description,
-                    degree=degree,
-                    institution_name=institution_name,
-                    linkedin_url=institution_linkedin_url
-                )
-                self.add_education(education)
-            except (NoSuchElementException, IndexError) as e:
-                # Skip this education entry if elements are missing
-                continue
-
-    def get_name_and_location(self):
-        top_panel = self.driver.find_element(By.XPATH, "//*[@class='mt2 relative']")
-        self.name = top_panel.find_element(By.TAG_NAME, "h1").text
-        self.location = top_panel.find_element(By.XPATH, "//*[@class='text-body-small inline t-black--light break-words']").text
-
-    def get_about(self):
-        try:
-            about = self.driver.find_element(By.ID,"about").find_element(By.XPATH,"..").find_element(By.CLASS_NAME,"display-flex").text
-        except NoSuchElementException :
-            about=None
-        self.about = about
-
-    def scrape_logged_in(self, close_on_complete=True):
+    async def _scrape_logged_in(self, close_on_complete: bool = True):
         driver = self.driver
-        duration = None
+        if not driver:
+            return
 
-        root = WebDriverWait(driver, self.__WAIT_FOR_ELEMENT_TIMEOUT).until(
-            EC.presence_of_element_located(
-                (
-                    By.TAG_NAME,
-                    self.__TOP_CARD,
-                )
-            )
+        await actions.wait_for_element(
+            driver,
+            by=By.TAG_NAME,
+            name=self.__TOP_CARD,
+            timeout=self.__WAIT_FOR_ELEMENT_TIMEOUT,
         )
-        self.focus()
-        self.wait(5)
+        try:
+            await driver.bring_to_front()
+        except Exception:
+            pass
+        await actions.human_delay(driver, min_seconds=2, max_seconds=4)
 
-        # get name and location
-        self.get_name_and_location()
-        self.human_pause()
+        await self._collect_name_and_location()
+        await actions.human_delay(driver, min_seconds=1, max_seconds=2.5)
 
-        self.open_to_work = self.is_open_to_work()
+        self.open_to_work = await self._is_open_to_work()
 
-        # get about
-        self.get_about()
-        driver.execute_script(
+        await self._collect_about()
+        await driver.evaluate(
             "window.scrollTo(0, Math.ceil(document.body.scrollHeight/2));"
         )
-        self.human_pause()
-        driver.execute_script(
+        await actions.human_delay(driver, min_seconds=1, max_seconds=2.5)
+        await driver.evaluate(
             "window.scrollTo(0, Math.ceil(document.body.scrollHeight/1.5));"
         )
-        self.human_pause()
+        await actions.human_delay(driver, min_seconds=1, max_seconds=2.5)
 
-        # get experience
-        self.get_experiences()
-        self.human_pause()
+        await self._collect_experiences()
+        await actions.human_delay(driver, min_seconds=1, max_seconds=2.5)
 
-        # get education
-        self.get_educations()
-        self.human_pause()
+        await self._collect_educations()
+        await actions.human_delay(driver, min_seconds=1, max_seconds=2.5)
 
-        driver.get(self.linkedin_url)
-        self.human_pause()
+        await driver.get(self.linkedin_url)
+        await actions.human_delay(driver, min_seconds=1, max_seconds=2.5)
 
-        # get interest
+        await self._collect_interests()
+        await self._collect_accomplishments()
+        await self._collect_contacts()
+
+        if close_on_complete and self._owns_browser and self.browser:
+            await self.browser.stop()
+
+    async def _is_open_to_work(self) -> bool:
         try:
+            return bool(
+                await self.driver.evaluate(
+                    """
+                    const badge = document.querySelector('.pv-top-card-profile-picture img');
+                    return badge && badge.title && badge.title.includes('#OPEN_TO_WORK');
+                    """
+                )
+            )
+        except Exception:
+            return False
 
-            _ = WebDriverWait(driver, self.__WAIT_FOR_ELEMENT_TIMEOUT).until(
-                EC.presence_of_element_located(
-                    (
-                        By.XPATH,
-                        "//*[@class='pv-profile-section pv-interests-section artdeco-container-card artdeco-card ember-view']",
-                    )
-                )
+    async def _collect_experiences(self):
+        if not self.linkedin_url or not self.driver:
+            return
+        url = os.path.join(self.linkedin_url, "details/experience")
+        await self.driver.get(url)
+        await actions.human_delay(self.driver, min_seconds=1, max_seconds=2.5)
+        try:
+            await self.driver.bring_to_front()
+        except Exception:
+            pass
+        await actions.human_like_scroll(self.driver, target_ratio=0.5)
+        await actions.human_like_scroll(self.driver, target_ratio=1.0)
+
+        script = """
+        (() => {
+            function parseTimes(str) {
+                if (!str) return {from: null, to: null, duration: null};
+                const parts = str.split("·");
+                const datePart = (parts[0] || "").trim();
+                const duration = parts.length > 1 ? (parts[1] || "").trim() : null;
+                const segments = datePart.split(" ").filter(Boolean);
+                const from = segments.slice(0, 2).join(" ") || null;
+                const to = segments.length > 3 ? segments.slice(3).join(" ").trim() || null : null;
+                return {from, to, duration};
+            }
+            const items = Array.from(document.querySelectorAll("li.pvs-list__paged-list-item"));
+            const result = [];
+            for (const item of items) {
+                const entity = item.querySelector("div[data-view-name='profile-component-entity']");
+                if (!entity) continue;
+                const blocks = Array.from(entity.children || []);
+                const logoBlock = blocks[0];
+                const details = blocks[1];
+                const companyLink = logoBlock?.querySelector("a")?.href || null;
+                const detailsBlocks = details ? Array.from(details.children || []) : [];
+                const summaryDetails = detailsBlocks[0] || null;
+                const summaryText = detailsBlocks[1] || null;
+                const outerWrapper = summaryDetails?.querySelector(":scope > *");
+                const outerPositions = outerWrapper ? Array.from(outerWrapper.children || []) : [];
+                let positionTitle = "";
+                let company = "";
+                let workTimes = "";
+                let location = "";
+                if (outerPositions.length === 4) {
+                    positionTitle = (outerPositions[0].innerText || "").trim();
+                    company = (outerPositions[1].innerText || "").trim();
+                    workTimes = (outerPositions[2].innerText || "").trim();
+                    location = (outerPositions[3].innerText || "").trim();
+                } else if (outerPositions.length === 3) {
+                    if ((outerPositions[2].innerText || "").includes("·")) {
+                        positionTitle = (outerPositions[0].innerText || "").trim();
+                        company = (outerPositions[1].innerText || "").trim();
+                        workTimes = (outerPositions[2].innerText || "").trim();
+                    } else {
+                        company = (outerPositions[0].innerText || "").trim();
+                        workTimes = (outerPositions[1].innerText || "").trim();
+                        location = (outerPositions[2].innerText || "").trim();
+                    }
+                } else if (outerPositions.length) {
+                    company = (outerPositions[0].innerText || "").trim();
+                    workTimes = outerPositions.length > 1 ? (outerPositions[1].innerText || "").trim() : "";
+                }
+                const parsed = parseTimes(workTimes);
+                const innerContainer = summaryText?.querySelector(".pvs-list__container");
+                if (innerContainer) {
+                    const innerItems = Array.from(innerContainer.querySelectorAll("li.pvs-list__paged-list-item"));
+                    for (const inner of innerItems) {
+                        const anchors = inner.querySelector("a");
+                        const children = anchors ? Array.from(anchors.children || []) : [];
+                        const tEl = children[0];
+                        const wEl = children[1];
+                        const locEl = children[2];
+                        const innerTimes = parseTimes(wEl ? (wEl.innerText || "") : "");
+                        result.push({
+                            position_title: tEl ? (tEl.innerText || "").trim() : positionTitle,
+                            institution_name: company,
+                            location: locEl ? (locEl.innerText || "").trim() : location,
+                            from_date: innerTimes.from,
+                            to_date: innerTimes.to,
+                            duration: innerTimes.duration,
+                            description: (inner.innerText || "").trim(),
+                            linkedin_url: companyLink,
+                        });
+                    }
+                    continue;
+                }
+                result.push({
+                    position_title: positionTitle,
+                    institution_name: company,
+                    location,
+                    from_date: parsed.from,
+                    to_date: parsed.to,
+                    duration: parsed.duration,
+                    description: summaryText ? (summaryText.innerText || "").trim() : "",
+                    linkedin_url: companyLink,
+                });
+            }
+            return result;
+        })();
+        """
+        experiences: List[Dict[str, Any]] = await self.driver.evaluate(script, await_promise=True)
+        for item in experiences or []:
+            experience = Experience(
+                position_title=item.get("position_title"),
+                from_date=item.get("from_date"),
+                to_date=item.get("to_date"),
+                duration=item.get("duration"),
+                location=item.get("location"),
+                description=item.get("description"),
+                institution_name=item.get("institution_name"),
+                linkedin_url=item.get("linkedin_url"),
             )
-            interestContainer = driver.find_element(By.XPATH,
-                "//*[@class='pv-profile-section pv-interests-section artdeco-container-card artdeco-card ember-view']"
+            self.add_experience(experience)
+
+    async def _collect_educations(self):
+        if not self.linkedin_url or not self.driver:
+            return
+        url = os.path.join(self.linkedin_url, "details/education")
+        await self.driver.get(url)
+        await actions.human_delay(self.driver, min_seconds=1, max_seconds=2.5)
+        try:
+            await self.driver.bring_to_front()
+        except Exception:
+            pass
+        await actions.human_like_scroll(self.driver, target_ratio=0.5)
+        await actions.human_like_scroll(self.driver, target_ratio=1.0)
+
+        script = """
+        (() => {
+            const items = Array.from(document.querySelectorAll("li.pvs-list__paged-list-item"));
+            const result = [];
+            for (const item of items) {
+                const entity = item.querySelector("div[data-view-name='profile-component-entity']");
+                if (!entity) continue;
+                const blocks = Array.from(entity.children || []);
+                const logoBlock = blocks[0];
+                const details = blocks[1];
+                const institutionLink = logoBlock?.querySelector("a")?.href || null;
+                const detailsBlocks = details ? Array.from(details.children || []) : [];
+                const summaryDetails = detailsBlocks[0] || null;
+                const summaryText = detailsBlocks[1] || null;
+                const outerWrapper = summaryDetails?.querySelector(":scope > *");
+                const outerPositions = outerWrapper ? Array.from(outerWrapper.children || []) : [];
+                const institution_name = outerPositions[0] ? (outerPositions[0].innerText || "").trim() : "";
+                const degree = outerPositions[1] ? (outerPositions[1].innerText || "").trim() : null;
+                let from_date = null;
+                let to_date = null;
+                if (outerPositions.length > 2) {
+                    try {
+                        const times = (outerPositions[2].innerText || "").trim().split(" ");
+                        const dashIndex = times.indexOf("-");
+                        if (dashIndex > 0) {
+                            from_date = times[dashIndex-1];
+                        }
+                        if (dashIndex >= 0 && dashIndex < times.length - 1) {
+                            to_date = times[times.length - 1];
+                        }
+                    } catch (e) {}
+                }
+                result.push({
+                    institution_name,
+                    degree,
+                    from_date,
+                    to_date,
+                    description: summaryText ? (summaryText.innerText || "").trim() : "",
+                    linkedin_url: institutionLink,
+                });
+            }
+            return result;
+        })();
+        """
+        educations: List[Dict[str, Any]] = await self.driver.evaluate(script, await_promise=True)
+        for item in educations or []:
+            education = Education(
+                from_date=item.get("from_date"),
+                to_date=item.get("to_date"),
+                description=item.get("description"),
+                degree=item.get("degree"),
+                institution_name=item.get("institution_name"),
+                linkedin_url=item.get("linkedin_url"),
             )
-            for interestElement in interestContainer.find_elements(By.XPATH,
-                "//*[@class='pv-interest-entity pv-profile-section__card-item ember-view']"
-            ):
-                interest = Interest(
-                    interestElement.find_element(By.TAG_NAME, "h3").text.strip()
-                )
-                self.add_interest(interest)
-        except:
+            self.add_education(education)
+
+    async def _collect_name_and_location(self):
+        if not self.driver:
+            return
+        data = await self.driver.evaluate(
+            """
+            (() => {
+                const root = document.querySelector('main .mt2.relative') || document.querySelector('main');
+                return {
+                    name: root ? (root.querySelector('h1')?.innerText || '').trim() : '',
+                    location: root ? (root.querySelector('.text-body-small.inline.t-black--light.break-words')?.innerText || '').trim() : ''
+                };
+            })();
+            """
+        )
+        if data:
+            self.name = data.get("name") or self.name
+            self.location = data.get("location") or getattr(self, "location", None)
+
+    async def _collect_about(self):
+        if not self.driver:
+            return
+        about = await self.driver.evaluate(
+            """
+            (() => {
+                const aboutSection = document.getElementById('about');
+                if (!aboutSection) return null;
+                const container = aboutSection.closest('section') || aboutSection.parentElement;
+                const target = container?.querySelector('.display-flex') || container;
+                return target?.innerText?.trim() || null;
+            })();
+            """
+        )
+        self.about = about
+
+    async def _collect_interests(self):
+        if not self.driver:
+            return
+        try:
+            interest_titles = await self.driver.evaluate(
+                """
+                (() => {
+                    const container = document.querySelector('.pv-profile-section.pv-interests-section.artdeco-container-card') ||
+                                       document.querySelector('[id*=interests]');
+                    const items = Array.from(container?.querySelectorAll('.pv-interest-entity, li.artdeco-list__item') || []);
+                    return items.map(el => {
+                        const target = el.querySelector('h3') || el.querySelector('span') || el;
+                        return (target.innerText || '').trim();
+                    }).filter(Boolean);
+                })();
+                """
+            )
+            for title in interest_titles or []:
+                self.add_interest(Interest(title))
+        except Exception:
             pass
 
-        # get accomplishment
+    async def _collect_accomplishments(self):
+        if not self.driver:
+            return
         try:
-            _ = WebDriverWait(driver, self.__WAIT_FOR_ELEMENT_TIMEOUT).until(
-                EC.presence_of_element_located(
-                    (
-                        By.XPATH,
-                        "//*[@class='pv-profile-section pv-accomplishments-section artdeco-container-card artdeco-card ember-view']",
-                    )
-                )
+            accomplishments = await self.driver.evaluate(
+                """
+                (() => {
+                    const acc = document.querySelector('.pv-profile-section.pv-accomplishments-section.artdeco-container-card');
+                    if (!acc) return [];
+                    const result = [];
+                    const blocks = acc.querySelectorAll('.pv-accomplishments-block__content.break-words');
+                    blocks.forEach(block => {
+                        const category = block.querySelector('h3')?.innerText?.trim() || '';
+                        block.querySelectorAll('ul li').forEach(li => {
+                            result.push({category, title: (li.innerText || '').trim()});
+                        });
+                    });
+                    return result;
+                })();
+                """
             )
-            acc = driver.find_element(By.XPATH,
-                "//*[@class='pv-profile-section pv-accomplishments-section artdeco-container-card artdeco-card ember-view']"
-            )
-            for block in acc.find_elements(By.XPATH,
-                "//div[@class='pv-accomplishments-block__content break-words']"
-            ):
-                category = block.find_element(By.TAG_NAME, "h3")
-                for title in block.find_element(By.TAG_NAME,
-                    "ul"
-                ).find_elements(By.TAG_NAME, "li"):
-                    accomplishment = Accomplishment(category.text, title.text)
-                    self.add_accomplishment(accomplishment)
-        except:
+            for item in accomplishments or []:
+                self.add_accomplishment(Accomplishment(item.get("category"), item.get("title")))
+        except Exception:
             pass
 
-        # get connections
+    async def _collect_contacts(self):
+        if not self.driver:
+            return
         try:
-            driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
-            self.human_pause()
-            _ = WebDriverWait(driver, self.__WAIT_FOR_ELEMENT_TIMEOUT).until(
-                EC.presence_of_element_located((By.CLASS_NAME, "mn-connections"))
+            await self.driver.get("https://www.linkedin.com/mynetwork/invite-connect/connections/")
+            await actions.human_delay(self.driver, min_seconds=1, max_seconds=2.5)
+            contacts = await self.driver.evaluate(
+                """
+                (() => {
+                    const cards = Array.from(document.querySelectorAll('.mn-connections .mn-connection-card'));
+                    return cards.map(card => {
+                        return {
+                            url: card.querySelector('.mn-connection-card__link')?.href || null,
+                            name: card.querySelector('.mn-connection-card__name')?.innerText?.trim() || '',
+                            occupation: card.querySelector('.mn-connection-card__occupation')?.innerText?.trim() || ''
+                        };
+                    }).filter(item => item.name);
+                })();
+                """
             )
-            connections = driver.find_element(By.CLASS_NAME, "mn-connections")
-            if connections is not None:
-                for conn in connections.find_elements(By.CLASS_NAME, "mn-connection-card"):
-                    anchor = conn.find_element(By.CLASS_NAME, "mn-connection-card__link")
-                    url = anchor.get_attribute("href")
-                    name = conn.find_element(By.CLASS_NAME, "mn-connection-card__details").find_element(By.CLASS_NAME, "mn-connection-card__name").text.strip()
-                    occupation = conn.find_element(By.CLASS_NAME, "mn-connection-card__details").find_element(By.CLASS_NAME, "mn-connection-card__occupation").text.strip()
-
-                    contact = Contact(name=name, occupation=occupation, url=url)
-                    self.add_contact(contact)
-        except:
-            connections = None
-
-        if close_on_complete:
-            driver.quit()
+            for item in contacts or []:
+                self.add_contact(
+                    Contact(name=item.get("name"), occupation=item.get("occupation"), url=item.get("url"))
+                )
+        except Exception:
+            pass
 
     @property
     def company(self):

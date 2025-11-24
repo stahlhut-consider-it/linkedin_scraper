@@ -50,11 +50,7 @@ Version **2.0.0** and before is called ``linkedin_user_scraper`` and can be inst
 Setup
 -----
 
-Undetected ChromeDriver is used by default and will manage a compatible driver automatically. To force a specific driver binary, set:
-
-.. code-block:: bash
-
-   export CHROMEDRIVER=~/chromedriver
+`zendriver <https://zendriver.dev/>`_ is used to launch and control Chrome via the DevTools protocol, so no separate ChromeDriver binary is required. Provide a ``user_data_dir`` in the config if you want to reuse an existing Chrome profile.
 
 
 Usage
@@ -67,14 +63,21 @@ Sample Usage
 
 .. code-block:: python
 
+   import asyncio
    from linkedin_scraper import Person, actions
-   import undetected_chromedriver as uc
-   driver = uc.Chrome()
 
-   email = "some-email@email.address"
-   password = "password123"
-   actions.login(driver, email, password) # if email and password isnt given, it'll prompt in terminal
-   person = Person("https://www.linkedin.com/in/joey-sham-aa2a50122", driver=driver)
+
+   async def main():
+       browser = await actions.start_browser(actions.build_browser_config())
+       tab = await browser.get("https://www.linkedin.com/")
+       await actions.login(tab, "some-email@email.address", "password123")
+       person = Person("https://www.linkedin.com/in/joey-sham-aa2a50122", driver=tab, close_on_complete=False)
+       print(person)
+       await browser.stop()
+
+
+   if __name__ == "__main__":
+       asyncio.run(main())
 
 **NOTE**\ : The account used to log-in should have it's language set English to make sure everything works as expected.
 
@@ -96,9 +99,7 @@ Scraping sites where login is required first
    .. code-block:: python
 
       from linkedin_scraper import Person
-      import undetected_chromedriver as uc
-      driver = uc.Chrome()
-      person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver = driver, scrape=False)
+      person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", scrape=False)
 
 #. Login to Linkedin
 #. [OPTIONAL] Logout of Linkedin
@@ -124,13 +125,21 @@ From verison **2.4.0** on, ``actions`` is a part of the library that allows sign
 
 .. code-block:: python
 
+   import asyncio
    from linkedin_scraper import Person, actions
-   import undetected_chromedriver as uc
-   driver = uc.Chrome()
-   email = "some-email@email.address"
-   password = "password123"
-   actions.login(driver, email, password) # if email and password isnt given, it'll prompt in terminal
-   person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver=driver)
+
+
+   async def main():
+       browser = await actions.start_browser(actions.build_browser_config())
+       tab = await browser.get("https://www.linkedin.com/")
+       await actions.login(tab, "some-email@email.address", "password123")
+       person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver=tab, close_on_complete=False)
+       print(person)
+       await browser.stop()
+
+
+   if __name__ == "__main__":
+       asyncio.run(main())
 
 API
 ---
@@ -192,15 +201,23 @@ This the most recent job title they have.
 ``driver``
 ~~~~~~~~~~~~~~
 
-This is the driver used to scrape the Linkedin profile. An undetected Chrome driver is created by default. However, if a driver is passed in, that will be used instead.
+This is the driver used to scrape the Linkedin profile. A ``zendriver`` tab is created by default. However, if a driver is passed in, that will be used instead.
 
 For example
 
 .. code-block:: python
 
-   import undetected_chromedriver as uc
-   driver = uc.Chrome()
-   person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver = driver)
+   import asyncio
+   from linkedin_scraper import Person, actions
+
+   async def main():
+       browser = await actions.start_browser(actions.build_browser_config())
+       tab = await browser.get("https://www.linkedin.com/")
+       person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver = tab, close_on_complete=False)
+       print(person)
+       await browser.stop()
+
+   asyncio.run(main())
 
 ``scrape``
 ~~~~~~~~~~~~~~

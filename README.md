@@ -35,11 +35,7 @@ pip3 install --user linkedin_scraper
 Version **2.0.0** and before is called `linkedin_user_scraper` and can be installed via `pip3 install --user linkedin_user_scraper`
 
 ## Setup
-Undetected ChromeDriver is used by default and will manage a compatible driver automatically. To force a specific driver binary, set:
-
-```bash
-export CHROMEDRIVER=~/chromedriver
-```
+[`zendriver`](https://zendriver.dev/) is used to launch and drive Chrome via the DevTools protocol, so you don't need to download or manage a separate ChromeDriver binary. Provide a `user_data_dir` in the config if you want to reuse an existing Chrome profile.
 
 ## Sponsor
 Message me if you'd like to sponsor me
@@ -49,14 +45,21 @@ To use it, just create the class.
 
 ### Sample Usage
 ```python
+import asyncio
 from linkedin_scraper import Person, actions
-import undetected_chromedriver as uc
-driver = uc.Chrome()
 
-email = "some-email@email.address"
-password = "password123"
-actions.login(driver, email, password) # if email and password isnt given, it'll prompt in terminal
-person = Person("https://www.linkedin.com/in/joey-sham-aa2a50122", driver=driver)
+
+async def main():
+    browser = await actions.start_browser(actions.build_browser_config())
+    tab = await browser.get("https://www.linkedin.com/")
+    await actions.login(tab, "some-email@email.address", "password123")
+    person = Person("https://www.linkedin.com/in/joey-sham-aa2a50122", driver=tab, close_on_complete=False)
+    print(person)
+    await browser.stop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 **NOTE**: The account used to log-in should have it's language set English to make sure everything works as expected.
@@ -73,9 +76,7 @@ person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5")
 3. 
 ```python
 from linkedin_scraper import Person
-import undetected_chromedriver as uc
-driver = uc.Chrome()
-person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver = driver, scrape=False)
+person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", scrape=False)
 ```
 4. Login to Linkedin
 5. [OPTIONAL] Logout of Linkedin
@@ -97,13 +98,21 @@ so it doesn't close.
 From verison **2.4.0** on, `actions` is a part of the library that allows signing into Linkedin first. The email and password can be provided as a variable into the function. If not provided, both will be prompted in terminal.
 
 ```python
+import asyncio
 from linkedin_scraper import Person, actions
-import undetected_chromedriver as uc
-driver = uc.Chrome()
-email = "some-email@email.address"
-password = "password123"
-actions.login(driver, email, password) # if email and password isnt given, it'll prompt in terminal
-person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver=driver)
+
+
+async def main():
+    browser = await actions.start_browser(actions.build_browser_config())
+    tab = await browser.get("https://www.linkedin.com/")
+    await actions.login(tab, "some-email@email.address", "password123")
+    person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver=tab, close_on_complete=False)
+    print(person)
+    await browser.stop()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 
@@ -143,13 +152,21 @@ This the most recent company or institution they have worked at.
 This the most recent job title they have. 
 
 #### `driver`
-This is the driver used to scrape the Linkedin profile. An undetected Chrome driver is created by default. However, if a driver is passed in, that will be used instead.
+This is the driver used to scrape the Linkedin profile. A ``zendriver`` tab is created by default. If a tab is passed in, that will be used instead.
 
 For example
 ```python
-import undetected_chromedriver as uc
-driver = uc.Chrome()
-person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver = driver)
+import asyncio
+from linkedin_scraper import Person, actions
+
+async def main():
+    browser = await actions.start_browser(actions.build_browser_config())
+    tab = await browser.get("https://www.linkedin.com/")
+    person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver=tab, close_on_complete=False)
+    print(person)
+    await browser.stop()
+
+asyncio.run(main())
 ```
 
 #### `scrape`

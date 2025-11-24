@@ -1,17 +1,13 @@
+import asyncio
+import random
 from dataclasses import dataclass
 from typing import Optional
-import random
 
-from selenium.webdriver.remote.webdriver import WebDriver
+import zendriver as zd
 
 from . import actions
 from . import constants as c
-
-from selenium import webdriver
-from selenium.common.exceptions import NoAlertPresentException, TimeoutException
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.wait import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from .by import By
 
 
 @dataclass
@@ -64,17 +60,35 @@ class Accomplishment(Institution):
 
 @dataclass
 class Scraper:
-    driver: Optional[WebDriver] = None
+    driver: Optional[zd.Tab] = None
+    browser: Optional[zd.Browser] = None
+    loop: Optional[asyncio.AbstractEventLoop] = None
+    _owns_browser: bool = False
     WAIT_FOR_ELEMENT_TIMEOUT = 10
     TOP_CARD = "pv-top-card"
     HUMAN_DELAY_MIN = 1
     HUMAN_DELAY_MAX = 8
 
+    def _has_running_loop(self) -> bool:
+        try:
+            loop = asyncio.get_running_loop()
+            return loop.is_running()
+        except RuntimeError:
+            return False
+
+    def _run(self, coro):
+        if self.loop and self.loop.is_running():
+            # Execute on existing loop; block until done.
+            return asyncio.run_coroutine_threadsafe(coro, self.loop).result()
+        if not self.loop:
+            self.loop = asyncio.new_event_loop()
+        return self.loop.run_until_complete(coro)
+
     def human_pause(self, min_seconds=None, max_seconds=None):
         """Pause with random mouse jitter to mimic slower human interactions."""
         min_seconds = min_seconds or self.HUMAN_DELAY_MIN
         max_seconds = max_seconds or self.HUMAN_DELAY_MAX
-        actions.human_delay(self.driver, min_seconds=min_seconds, max_seconds=max_seconds)
+        self._run(actions.human_delay(self.driver, min_seconds=min_seconds, max_seconds=max_seconds))
 
     def wait(self, duration):
         min_seconds = max(duration, self.HUMAN_DELAY_MIN)
@@ -82,88 +96,71 @@ class Scraper:
         self.human_pause(min_seconds=min_seconds, max_seconds=max_seconds)
 
     def focus(self):
-        self.driver.execute_script('alert("Focus window")')
-        try:
-            WebDriverWait(self.driver, 2).until(EC.alert_is_present())
-            self.driver.switch_to.alert.accept()
-        except (NoAlertPresentException, TimeoutException):
-            pass
+        if self.driver:
+            try:
+                self._run(self.driver.bring_to_front())
+            except Exception:
+                pass
 
     def mouse_click(self, elem):
         self.human_pause()
-        action = webdriver.ActionChains(self.driver)
-        # Hover with small offsets to look less robotic before caller clicks the element.
         try:
-            bounds = elem.size or {}
-            max_x = max(1, int(bounds.get("width", 4)))
-            max_y = max(1, int(bounds.get("height", 4)))
-            offset_x = random.randint(-min(6, max_x // 3), min(6, max_x // 3))
-            offset_y = random.randint(-min(6, max_y // 3), min(6, max_y // 3))
+            self._run(elem.click())
         except Exception:
-            offset_x = random.randint(-3, 3)
-            offset_y = random.randint(-3, 3)
-
-        hover_pause = random.uniform(0.12, 0.35)
-        settle_pause = random.uniform(0.05, 0.2)
-        action.move_to_element(elem).pause(hover_pause).move_by_offset(offset_x, offset_y).pause(settle_pause).perform()
+            pass
 
     def wait_for_element_to_load(self, by=By.CLASS_NAME, name="pv-top-card", base=None):
         base = base or self.driver
-        return WebDriverWait(base, self.WAIT_FOR_ELEMENT_TIMEOUT).until(
-            EC.presence_of_element_located(
-                (
-                    by,
-                    name
-                )
-            )
+        return self._run(
+            actions.wait_for_element(base, by=by, name=name, timeout=self.WAIT_FOR_ELEMENT_TIMEOUT)
         )
 
     def wait_for_all_elements_to_load(self, by=By.CLASS_NAME, name="pv-top-card", base=None):
         base = base or self.driver
-        return WebDriverWait(base, self.WAIT_FOR_ELEMENT_TIMEOUT).until(
-            EC.presence_of_all_elements_located(
-                (
-                    by,
-                    name
-                )
+        return self._run(
+            actions.wait_for_all_elements(
+                base, by=by, name=name, timeout=self.WAIT_FOR_ELEMENT_TIMEOUT
             )
         )
 
 
     def is_signed_in(self):
         try:
-            WebDriverWait(self.driver, self.WAIT_FOR_ELEMENT_TIMEOUT).until(
-                EC.presence_of_element_located(
-                    (
-                        By.CLASS_NAME,
-                        c.VERIFY_LOGIN_ID,
-                    )
+            self._run(
+                actions.wait_for_element(
+                    self.driver, by=By.CLASS_NAME, name=c.VERIFY_LOGIN_ID, timeout=self.WAIT_FOR_ELEMENT_TIMEOUT
                 )
             )
-
-            self.driver.find_element(By.CLASS_NAME, c.VERIFY_LOGIN_ID)
             return True
-        except Exception as e:
+        except Exception:
             pass
         return False
 
     def scroll_to_half(self):
-        actions.human_like_scroll(self.driver, target_ratio=0.5)
+        self._run(actions.human_like_scroll(self.driver, target_ratio=0.5))
         self.human_pause()
 
     def scroll_to_bottom(self):
-        actions.human_like_scroll(self.driver, target_ratio=1.0)
+        self._run(actions.human_like_scroll(self.driver, target_ratio=1.0))
         self.human_pause()
 
     def scroll_class_name_element_to_page_percent(self, class_name:str, page_percent:float):
-        self.driver.execute_script(
-            f'elem = document.getElementsByClassName("{class_name}")[0]; elem.scrollTo(0, elem.scrollHeight*{str(page_percent)});'
-        )
+        if not self.driver:
+            return
+        try:
+            self._run(
+                self.driver.evaluate(
+                    f'elem = document.getElementsByClassName("{class_name}")[0];'
+                    f' if (elem) {{ elem.scrollTo(0, elem.scrollHeight*{float(page_percent)}); }}'
+                )
+            )
+        except Exception:
+            pass
         self.human_pause()
 
     def __find_element_by_class_name__(self, class_name):
         try:
-            self.driver.find_element(By.CLASS_NAME, class_name)
+            self._run(actions.find_element(self.driver, By.CLASS_NAME, class_name))
             return True
         except:
             pass
@@ -171,7 +168,7 @@ class Scraper:
 
     def __find_element_by_xpath__(self, tag_name):
         try:
-            self.driver.find_element(By.XPATH,tag_name)
+            self._run(actions.find_element(self.driver, By.XPATH, tag_name))
             return True
         except:
             pass
@@ -179,8 +176,8 @@ class Scraper:
 
     def __find_enabled_element_by_xpath__(self, tag_name):
         try:
-            elem = self.driver.find_element(By.XPATH,tag_name)
-            return elem.is_enabled()
+            elem = self._run(actions.find_element(self.driver, By.XPATH, tag_name))
+            return bool(elem)
         except:
             pass
         return False

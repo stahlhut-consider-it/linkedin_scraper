@@ -1,4 +1,2 @@
-selenium
-undetected-chromedriver
 python-dotenv
-webdriver-manager
+zendriver
