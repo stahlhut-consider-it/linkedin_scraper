@@ -21,6 +21,17 @@ HEADLESS_USER_AGENT = (
 )
 
 
+def _random_window_size(
+    min_width: int = 1200, max_width: int = 1920, min_height: int = 800, max_height: int = 1080
+) -> tuple[int, int]:
+    """Pick a random but realistic viewport size."""
+    max_width = max(min_width, max_width)
+    max_height = max(min_height, max_height)
+    width = random.randint(min_width, max_width)
+    height = random.randint(min_height, max_height)
+    return width, height
+
+
 def __prompt_email_password() -> tuple[str, str]:
     user = input("Email: ")
     password = getpass.getpass(prompt="Password: ")
@@ -52,13 +63,15 @@ def build_browser_config(
         config.browser_args = []
     if "--disable-blink-features=AutomationControlled" not in config.browser_args:
         config.browser_args.append("--disable-blink-features=AutomationControlled")
+    if not any(arg.startswith("--window-size") for arg in config.browser_args):
+        width, height = _random_window_size()
+        config.browser_args.append(f"--window-size={width},{height}")
     if headless:
         ua = HEADLESS_USER_AGENT
         config.user_agent = ua
         if config.browser_args is None:
             config.browser_args = []
         config.browser_args.append(f"--user-agent={ua}")
-        config.browser_args.append("--window-size=1280,900")
     return config
 
 
