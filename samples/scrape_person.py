@@ -23,7 +23,7 @@ async def main():
     tab = await browser.get("https://www.linkedin.com/")
     tab = await actions.login(tab, email, password)  # prompts if env vars are missing
 
-    person = Person("https://www.linkedin.com/in/t-koch/", driver=tab, scrape=False, close_on_complete=False)
+    person = Person("https://www.linkedin.com/in/aron-benninger-666518381/", driver=tab, scrape=False, close_on_complete=False)
     await person.scrape_async(close_on_complete=False)
     print(person)
 

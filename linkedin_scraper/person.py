@@ -7,7 +7,7 @@ import zendriver as zd
 from . import actions
 from . import constants as c
 from .by import By
-from .objects import Accomplishment, Contact, Education, Experience, Interest, Scraper
+from .objects import Accomplishment, Contact, ContactInfoItem, Education, Experience, Interest, Scraper
 
 
 class Person(Scraper):
@@ -26,6 +26,7 @@ class Person(Scraper):
         company: Optional[str] = None,
         job_title: Optional[str] = None,
         contacts: Optional[List[Contact]] = None,
+        contact_info: Optional[List[ContactInfoItem]] = None,
         driver: Optional[zd.Tab | zd.Browser] = None,
         get: bool = True,
         scrape: bool = True,
@@ -42,6 +43,7 @@ class Person(Scraper):
         self.accomplishments = accomplishments or []
         self.also_viewed_urls: List[str] = []
         self.contacts = contacts or []
+        self.contact_info = contact_info or []
 
         self._external_loop: Optional[asyncio.AbstractEventLoop] = None
         try:
@@ -122,6 +124,9 @@ class Person(Scraper):
 
     def add_contact(self, contact):
         self.contacts.append(contact)
+
+    def add_contact_info(self, contact_info):
+        self.contact_info.append(contact_info)
 
     async def _ensure_navigation(self):
         if self._pending_nav:
@@ -229,6 +234,8 @@ class Person(Scraper):
 
         await self._collect_interests()
         await self._collect_accomplishments()
+        await actions.human_delay(driver, min_seconds=1, max_seconds=2.5)
+        await self._collect_contact_info()
         await self._collect_contacts()
 
         if close_on_complete and self._owns_browser and self.browser:
@@ -512,6 +519,82 @@ class Person(Scraper):
         except Exception:
             pass
 
+    async def _collect_contact_info(self):
+        if not self.linkedin_url or not self.driver:
+            return
+        url = os.path.join(self.linkedin_url, "overlay/contact-info/")
+        await self.driver.get(url)
+        await actions.human_delay(self.driver, min_seconds=1, max_seconds=3)
+        try:
+            await self.driver.bring_to_front()
+        except Exception:
+            pass
+        # Wait briefly for the overlay content to render.
+        try:
+            await actions.wait_for_element(
+                self.driver,
+                by=By.CSS_SELECTOR,
+                name="section[class*='ci-'], section.pv-contact-info__contact-type",
+                timeout=5,
+            )
+        except Exception:
+            pass
+        script = """
+        (() => {
+            const clean = (value) => (value || "").replace(/\\s+/g, " ").trim();
+            const sections = Array.from(document.querySelectorAll("section[class*='ci-'], section.pv-contact-info__contact-type"));
+            const results = [];
+            const processItem = (section, target, type, heading) => {
+                const anchor = target.querySelector("a[href]") || (target.tagName === "A" ? target : null);
+                const valueText =
+                    anchor?.innerText ||
+                    target.querySelector(".pv-contact-info__contact-item")?.innerText ||
+                    target.querySelector(".t-14.t-black")?.innerText ||
+                    target.querySelector(".t-14")?.innerText ||
+                    target.textContent ||
+                    "";
+                const labelText =
+                    target.querySelector(".pv-contact-info__header")?.innerText ||
+                    target.querySelector("abbr")?.innerText ||
+                    target.querySelector(".t-14.t-black--light")?.innerText ||
+                    heading ||
+                    "";
+                const cleanedValue = clean(valueText);
+                const cleanedLabel = clean(labelText);
+                const href = anchor?.href || null;
+                if (cleanedValue || cleanedLabel || href) {
+                    results.push({
+                        type: type || heading || null,
+                        label: cleanedLabel || null,
+                        value: cleanedValue || null,
+                        url: href,
+                    });
+                }
+            };
+            for (const section of sections) {
+                const typeClass = Array.from(section.classList).find(cls => cls.startsWith("ci-"));
+                const type = typeClass ? typeClass.replace("ci-", "") : null;
+                const heading = clean(section.querySelector("header h3")?.innerText || section.querySelector("h2")?.innerText || type || "");
+                const listItems = Array.from(section.querySelectorAll("ul li, li"));
+                const directLinks = Array.from(section.querySelectorAll("a[href].pv-contact-info__contact-link"));
+                const contactItems = Array.from(section.querySelectorAll(".pv-contact-info__contact-item"));
+                const targets = listItems.length ? listItems : (directLinks.length ? directLinks : (contactItems.length ? contactItems : [section]));
+                targets.forEach(target => processItem(section, target, type, heading));
+            }
+            return results;
+        })();
+        """
+        contact_info = await self.driver.evaluate(script, await_promise=True)
+        for item in contact_info or []:
+            self.add_contact_info(
+                ContactInfoItem(
+                    type=item.get("type"),
+                    label=item.get("label"),
+                    value=item.get("value"),
+                    url=item.get("url"),
+                )
+            )
+
     async def _collect_contacts(self):
         if not self.driver:
             return
@@ -562,12 +645,13 @@ class Person(Scraper):
             return None
 
     def __repr__(self):
-        return "<Person {name}\n\nAbout\n{about}\n\nExperience\n{exp}\n\nEducation\n{edu}\n\nInterest\n{int}\n\nAccomplishments\n{acc}\n\nContacts\n{conn}>".format(
+        return "<Person {name}\n\nAbout\n{about}\n\nExperience\n{exp}\n\nEducation\n{edu}\n\nInterest\n{int}\n\nAccomplishments\n{acc}\n\nContact Info\n{contact_info}\n\nContacts\n{conn}>".format(
             name=self.name,
             about=self.about,
             exp=self.experiences,
             edu=self.educations,
             int=self.interests,
             acc=self.accomplishments,
+            contact_info=self.contact_info,
             conn=self.contacts,
         )

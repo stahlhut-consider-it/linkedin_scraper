@@ -18,6 +18,14 @@ class Contact:
 
 
 @dataclass
+class ContactInfoItem:
+    type: str = None
+    label: str = None
+    value: str = None
+    url: str = None
+
+
+@dataclass
 class Institution:
     institution_name: str = None
     linkedin_url: str = None
