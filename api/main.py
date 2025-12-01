@@ -4,7 +4,8 @@ import asyncio
 import logging
 import os
 import random
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Tuple
 
 import zendriver as zd
 from dotenv import load_dotenv
@@ -126,27 +127,114 @@ class SessionManager:
             await self._stop_browser()
 
 
+class DailyRateLimiter:
+    def __init__(self, limit: int = 50) -> None:
+        self.limit = limit
+        self.count = 0
+        self.tz = datetime.now().astimezone().tzinfo or timezone.utc
+        self._reset_at = self._next_reset_at()
+        self.lock = asyncio.Lock()
+        self.stop_event = asyncio.Event()
+        self.reset_task: Optional[asyncio.Task] = None
+
+    def _now(self) -> datetime:
+        return datetime.now(tz=self.tz)
+
+    def _next_reset_at(self, *, now: Optional[datetime] = None) -> datetime:
+        now = now or self._now()
+        tomorrow = (now + timedelta(days=1)).date()
+        return datetime.combine(tomorrow, datetime.min.time(), tzinfo=self.tz)
+
+    def _reset_if_due(self, *, now: Optional[datetime] = None) -> None:
+        now = now or self._now()
+        if now >= self._reset_at:
+            self.count = 0
+            self._reset_at = self._next_reset_at(now=now)
+
+    async def start(self) -> None:
+        self.reset_task = asyncio.create_task(self._reset_loop())
+
+    async def stop(self) -> None:
+        self.stop_event.set()
+        if self.reset_task:
+            self.reset_task.cancel()
+            try:
+                await self.reset_task
+            except asyncio.CancelledError:
+                pass
+
+    async def _reset_loop(self) -> None:
+        while not self.stop_event.is_set():
+            now = self._now()
+            wait_seconds = max((self._reset_at - now).total_seconds(), 0)
+            try:
+                await asyncio.wait_for(self.stop_event.wait(), timeout=wait_seconds)
+                break
+            except asyncio.TimeoutError:
+                pass
+            async with self.lock:
+                self._reset_if_due()
+
+    async def try_acquire(self) -> Tuple[bool, datetime]:
+        async with self.lock:
+            self._reset_if_due()
+            if self.count >= self.limit:
+                return False, self._reset_at
+            self.count += 1
+            return True, self._reset_at
+
+    async def refund(self) -> None:
+        async with self.lock:
+            self._reset_if_due()
+            if self.count > 0:
+                self.count -= 1
+
+    async def snapshot(self) -> dict:
+        async with self.lock:
+            self._reset_if_due()
+            return {
+                "limit": self.limit,
+                "used": self.count,
+                "remaining": max(self.limit - self.count, 0),
+                "next_reset_at": self._reset_at.isoformat(),
+            }
+
+
 app = FastAPI(title="LinkedIn Scraper API", version="0.1.0")
 session_manager = SessionManager(headless=_env_bool("LINKEDIN_SCRAPER_HEADLESS", False))
+rate_limiter = DailyRateLimiter(limit=50)
 
 
 @app.on_event("startup")
 async def on_startup() -> None:
     await session_manager.start()
+    await rate_limiter.start()
 
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    await rate_limiter.stop()
     await session_manager.stop()
 
 
 @app.post("/scrape")
 async def scrape_profile(payload: ScrapeRequest) -> dict:
+    allowed, reset_at = await rate_limiter.try_acquire()
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "message": "Tageslimit erreicht: maximal 50 Profile pro Tag.",
+                "next_reset_at": reset_at.isoformat(),
+            },
+        )
     try:
         output = await session_manager.scrape_profile(str(payload.linkedin_url))
     except SessionUnavailableError as exc:
+        await rate_limiter.refund()
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception:
+        await rate_limiter.refund()
         logger.exception("Unexpected scraping error.")
         raise HTTPException(status_code=500, detail="Scraping failed. Check server logs.")
     return {"output": output}
@@ -154,4 +242,5 @@ async def scrape_profile(payload: ScrapeRequest) -> dict:
 
 @app.get("/status")
 async def status() -> dict:
-    return {"available": session_manager.is_available}
+    limiter_state = await rate_limiter.snapshot()
+    return {"available": session_manager.is_available, "rate_limit": limiter_state}
