@@ -14,7 +14,10 @@ from zendriver import cdp
 from . import constants as c
 from .by import By
 
-COOKIE_ENV_KEY = "LINKEDIN_LI_AT_FILE"
+COOKIE_ENV_KEY = "LINKEDIN_LI_AT"
+EMAIL_ENV_KEY = "LINKEDIN_USER"
+PASSWORD_ENV_KEY = "LINKEDIN_PASSWORD"
+DEFAULT_ENV_PATH = Path(".env")
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
@@ -350,37 +353,55 @@ async def _dismiss_cookie_banner(tab: zd.Tab, timeout: float = 12) -> bool:
     return False
 
 
-def _cookie_path(path_hint: Optional[str] = None) -> Path:
-    env_path = os.getenv(COOKIE_ENV_KEY)
+def _env_file_path(path_hint: Optional[str] = None) -> Path:
     if path_hint:
         return Path(path_hint).expanduser()
-    if env_path:
-        return Path(env_path).expanduser()
-    return Path.home() / ".linkedin_li_at.cookie"
+    return DEFAULT_ENV_PATH
 
 
-def _load_cookie_from_disk(path: Path) -> Optional[str]:
+def _persist_cookie_value(value: str, env_path: Path) -> bool:
+    value = value.strip()
+    if not value:
+        return False
+    os.environ[COOKIE_ENV_KEY] = value
     try:
-        if path.is_file():
-            value = path.read_text().strip()
-            return value or None
-    except Exception:
-        return None
-    return None
-
-
-def _persist_cookie_value(value: str, path: Path) -> bool:
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(value.strip())
+        env_path = env_path.expanduser()
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        lines = env_path.read_text().splitlines() if env_path.exists() else []
+        new_lines: list[str] = []
+        found = False
+        for line in lines:
+            if line.strip().startswith("#") or "=" not in line:
+                new_lines.append(line)
+                continue
+            key, _, _ = line.partition("=")
+            if key.strip() == COOKIE_ENV_KEY:
+                new_lines.append(f'{COOKIE_ENV_KEY}="{value}"')
+                found = True
+            else:
+                new_lines.append(line)
+        if not found:
+            new_lines.append(f'{COOKIE_ENV_KEY}="{value}"')
+        env_path.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
         return True
     except Exception:
         return False
 
 
-def _delete_cookie_file(path: Path) -> None:
+def _clear_cookie_env_value(env_path: Path) -> None:
+    os.environ.pop(COOKIE_ENV_KEY, None)
     try:
-        path.unlink(missing_ok=True)
+        env_path = env_path.expanduser()
+        if not env_path.exists():
+            return
+        lines = env_path.read_text().splitlines()
+        new_lines: list[str] = []
+        for line in lines:
+            key, sep, _ = line.partition("=")
+            if sep and key.strip() == COOKIE_ENV_KEY:
+                continue
+            new_lines.append(line)
+        env_path.write_text("\n".join(new_lines) + ("\n" if new_lines else ""))
     except Exception:
         pass
 
@@ -450,18 +471,36 @@ async def login(
     cookie: Optional[str] = None,
     timeout: float = 10,
     cookie_path: Optional[str] = None,
-) -> None:
+    env_path: Optional[str] = None,
+    restart_on_cookie_failure: bool = True,
+) -> zd.Tab:
     browser = tab.browser
-    cookie_file = _cookie_path(cookie_path)
-    cookie = cookie or _load_cookie_from_disk(cookie_file)
+    env_file = _env_file_path(env_path or cookie_path)
+    email = email or os.getenv(EMAIL_ENV_KEY)
+    password = password or os.getenv(PASSWORD_ENV_KEY)
+    cookie = cookie or os.getenv(COOKIE_ENV_KEY)
     if cookie and browser:
         if await _login_with_cookie(browser, tab, cookie, timeout=timeout):
-            _persist_cookie_value(cookie, cookie_file)
-            return
+            _persist_cookie_value(cookie, env_file)
+            return tab
         # Failed cookie login: clear stored cookie and browser state so we can fall back safely.
-        _delete_cookie_file(cookie_file)
+        _clear_cookie_env_value(env_file)
         await _clear_li_at_cookie(browser)
+        if restart_on_cookie_failure:
+            return await _restart_browser_with_credentials(
+                tab, email=email, password=password, timeout=timeout, env_file=env_file
+            )
 
+    return await _login_with_credentials(tab, email=email, password=password, timeout=timeout, env_file=env_file)
+
+
+async def _login_with_credentials(
+    tab: zd.Tab,
+    email: Optional[str],
+    password: Optional[str],
+    timeout: float,
+    env_file: Path,
+) -> zd.Tab:
     if not email or not password:
         email, password = __prompt_email_password()
 
@@ -486,7 +525,40 @@ async def login(
     if await _is_logged_in(tab, timeout=timeout):
         new_cookie = await _read_li_at_from_driver(tab)
         if new_cookie:
-            _persist_cookie_value(new_cookie, cookie_file)
+            _persist_cookie_value(new_cookie, env_file)
+    return tab
+
+
+async def _restart_browser_with_credentials(
+    tab: zd.Tab,
+    email: Optional[str],
+    password: Optional[str],
+    timeout: float,
+    env_file: Path,
+) -> zd.Tab:
+    old_browser = tab.browser
+    config = getattr(old_browser, "config", None) if old_browser else None
+    headless = getattr(config, "headless", False) if config else False
+    browser_executable_path = getattr(config, "browser_executable_path", None) if config else None
+    browser_args = getattr(config, "browser_args", None) if config else None
+    lang = getattr(config, "lang", None) if config else None
+
+    try:
+        if old_browser:
+            await old_browser.stop()
+    except Exception:
+        pass
+
+    new_config = build_browser_config(
+        headless=headless,
+        user_data_dir=None,  # fresh profile to avoid stale cookies
+        browser_executable_path=browser_executable_path,
+        browser_args=browser_args,
+        lang=lang,
+    )
+    new_browser = await start_browser(new_config)
+    new_tab = await new_browser.get("https://www.linkedin.com/")
+    return await _login_with_credentials(new_tab, email=email, password=password, timeout=timeout, env_file=env_file)
 
 
 async def _login_with_cookie(

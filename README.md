@@ -52,7 +52,7 @@ from linkedin_scraper import Person, actions
 async def main():
     browser = await actions.start_browser(actions.build_browser_config())
     tab = await browser.get("https://www.linkedin.com/")
-    await actions.login(tab, "some-email@email.address", "password123")
+    tab = await actions.login(tab, "some-email@email.address", "password123")
     person = Person("https://www.linkedin.com/in/joey-sham-aa2a50122", driver=tab, close_on_complete=False)
     print(person)
     await browser.stop()
@@ -105,7 +105,7 @@ from linkedin_scraper import Person, actions
 async def main():
     browser = await actions.start_browser(actions.build_browser_config())
     tab = await browser.get("https://www.linkedin.com/")
-    await actions.login(tab, "some-email@email.address", "password123")
+    tab = await actions.login(tab, "some-email@email.address", "password123")
     person = Person("https://www.linkedin.com/in/andre-iguodala-65b48ab5", driver=tab, close_on_complete=False)
     print(person)
     await browser.stop()

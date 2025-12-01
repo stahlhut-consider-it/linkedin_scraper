@@ -21,7 +21,7 @@ async def main():
     config = actions.build_browser_config(headless=True)
     browser = await actions.start_browser(config)
     tab = await browser.get("https://www.linkedin.com/")
-    await actions.login(tab, email, password)
+    tab = await actions.login(tab, email, password)
 
     person = Person("https://www.linkedin.com/in/adrian0350", contacts=[], driver=tab, scrape=False, close_on_complete=False)
     await person.scrape_async(close_on_complete=False)
