@@ -10,6 +10,7 @@ Scrapes Linkedin person data.
   + [Person Scraping](#person-scraping)
   + [Scraping sites where login is required first](#scraping-sites-where-login-is-required-first)
   + [Scraping sites and login automatically](#scraping-sites-and-login-automatically)
+* [Docker](#docker)
 * [API](#api)
   + [Person](#person)
     - [`linkedin_url`](#linkedin_url)
@@ -124,6 +125,34 @@ Run the scraper as an API that logs in on startup, refreshes the session every 3
 4. POST to `/scrape` with JSON payload `{"linkedin_url": "https://www.linkedin.com/in/some-user/"}`. The API returns the same text output you would see from `print(person)`.
 
 Set `LINKEDIN_SCRAPER_HEADLESS=false` if you want to see the browser window instead of running headless.
+
+## Docker
+Run the FastAPI scraper in a container with a virtual display (Xvfb) so Chrome stays headful inside the container.
+
+1. Create `.env` with your credentials:
+   ```bash
+   LINKEDIN_USER=you@example.com
+   LINKEDIN_PASSWORD=supersecret
+   LINKEDIN_LI_AT=optional_cookie
+   LINKEDIN_SCRAPER_HEADLESS=false
+   PORT=8000
+   ```
+2. Build and start: `docker compose up --build -d`
+3. Check status: `curl http://localhost:8000/status`
+4. Scrape:
+   ```bash
+   curl -X POST http://localhost:8000/scrape \
+     -H 'Content-Type: application/json' \
+     -d '{"linkedin_url": "https://www.linkedin.com/in/your-target/"}'
+   ```
+5. Take a screenshot of the virtual display (optional):
+   ```bash
+   docker compose exec linkedin-scraper ./docker/capture_screenshot.sh /tmp/screen.png
+   docker compose cp linkedin-scraper:/tmp/screen.png ./screen.png
+   ```
+6. Stop: `docker compose down`
+
+Tweaks: change the published port in `docker-compose.yml`, set `XVFB_RESOLUTION` (e.g., `1920x1080x24`), or switch to headless with `LINKEDIN_SCRAPER_HEADLESS=true`.
 
 
 ## API
