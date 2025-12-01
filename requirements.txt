@@ -1,2 +1,4 @@
 python-dotenv
 zendriver
+fastapi
+uvicorn[standard]

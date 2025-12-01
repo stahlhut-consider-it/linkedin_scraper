@@ -115,6 +115,16 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+### FastAPI Endpoint
+Run the scraper as an API that logs in on startup, refreshes the session every 30-90 minutes, and blocks requests while re-authenticating.
+
+1. Ensure `.env` contains `LINKEDIN_USER`, `LINKEDIN_PASSWORD`, and optionally `LINKEDIN_LI_AT`.
+2. Install dependencies: `pip install -r requirements.txt`
+3. Start the server: `uvicorn api.main:app --host 0.0.0.0 --port 8000`
+4. POST to `/scrape` with JSON payload `{"linkedin_url": "https://www.linkedin.com/in/some-user/"}`. The API returns the same text output you would see from `print(person)`.
+
+Set `LINKEDIN_SCRAPER_HEADLESS=false` if you want to see the browser window instead of running headless.
+
 
 ## API
 
