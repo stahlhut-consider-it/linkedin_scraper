@@ -14,3 +14,4 @@ creds.json
 venv
 *.zip
 .venv
+linkedin-scraper.tar

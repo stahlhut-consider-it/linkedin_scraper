@@ -154,6 +154,23 @@ Run the FastAPI scraper in a container with a virtual display (Xvfb) so Chrome s
 
 Tweaks: change the published port in `docker-compose.yml`, set `XVFB_RESOLUTION` (e.g., `1920x1080x24`), or switch to headless with `LINKEDIN_SCRAPER_HEADLESS=true`.
 
+### Sharing a published image with others
+If you push the image to a registry (e.g., Docker Hub or GHCR), others can run it without building locally.
+
+1. Ship `.env.example` and let others create their own `.env` with credentials: `cp .env.example .env` then fill `LINKEDIN_USER`, `LINKEDIN_PASSWORD`, optionally `LINKEDIN_LI_AT`.
+2. Publish the image: `docker build -t <registry-user>/linkedin-scraper:latest . && docker push <registry-user>/linkedin-scraper:latest`
+3. Others pull and start:
+   ```bash
+   docker pull <registry-user>/linkedin-scraper:latest
+   cp .env.example .env
+   docker compose up -d   # uses .env for secrets
+   ```
+   Or without Compose:
+   ```bash
+   docker run --env-file .env -p 8002:8002 <registry-user>/linkedin-scraper:latest
+   ```
+Never distribute your real `.env`; everyone should set their own secrets locally.
+
 
 ## API
 
