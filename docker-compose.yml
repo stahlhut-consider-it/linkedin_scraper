@@ -7,9 +7,9 @@ services:
       - .env
     environment:
       LINKEDIN_SCRAPER_HEADLESS: "false"
-      PORT: 8000
+      PORT: 8002
     ports:
-      - "8000:8000"
+      - "8002:8002"
     shm_size: "2gb"
     volumes:
       - chrome-data:/root/.config/chromium

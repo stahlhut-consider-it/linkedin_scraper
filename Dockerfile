@@ -38,7 +38,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN chmod +x docker/entrypoint.sh docker/capture_screenshot.sh
 
-EXPOSE 8000
+EXPOSE 8002
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["docker/entrypoint.sh"]
